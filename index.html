@@ -7,6 +7,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Astilla">
 <meta name="theme-color" content="#0b0d14">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
 <title>Astilla</title>
 <style>
 /* ---------- Farben ---------- */
@@ -141,21 +145,32 @@ button.link.del{color:var(--red)}
 <body>
 <div id="app"></div>
 <script>
-const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25;
+const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25, YAHOO_TTL = 15 * 60000;
 const pad = n => String(n).padStart(2, '0');
 const ds = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 const parseD = s => { const p = s.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); };
 const today = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); };
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const enc = encodeURIComponent;
 const num = (v, d = 2) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
 const dt = d => d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
 const dtl = d => d.toLocaleDateString('de-DE', { day: 'numeric', month: 'long' });
 const monShort = d => d.toLocaleDateString('de-DE', { month: 'short' });
+const stamp = ms => new Date(ms).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+const PROV = {
+  yahoo:  { name: 'Yahoo Finance', needsKey: false },
+  twelve: { name: 'Twelve Data',   needsKey: true },
+  alpha:  { name: 'Alpha Vantage', needsKey: true }
+};
+const ORDER = ['yahoo', 'twelve', 'alpha'];
+const sigOf = sym => [sym.yahoo, sym.twelve, sym.alpha].join('|');
 
 function defaults() {
   return {
-    settings: { apiKey: '', symbol: '', name: '', budget: 1000, tolUp: 1, tolDown: 3, pullback: 1, theme: 'dark' },
-    cache: { fetched: '', symbol: '', daily: [], weekly: [], error: '', detail: '', limitDate: '' },
+    settings: { provider: 'auto', keys: { twelve: '', alpha: '' }, sym: { yahoo: '', twelve: '', alpha: '' }, name: '',
+                budget: 1000, tolUp: 1, tolDown: 3, pullback: 1, theme: 'dark' },
+    cache: { fetched: '', at: 0, source: '', via: '', sig: '', daily: [], weekly: [], error: '', detail: '', limits: {}, liveTime: 0, currency: '' },
     usage: { date: '', n: 0 },
     log: []
   };
@@ -165,9 +180,18 @@ function load() {
   try {
     const d = JSON.parse(localStorage.getItem(KEY) || 'null');
     if (d) {
-      b.settings = Object.assign(b.settings, d.settings || {});
-      b.cache = Object.assign(b.cache, d.cache || {});
-      b.usage = Object.assign(b.usage, d.usage || {});
+      const s = d.settings || {};
+      Object.assign(b.settings, s);
+      b.settings.keys = Object.assign({ twelve: '', alpha: '' }, s.keys || {});
+      b.settings.sym = Object.assign({ yahoo: '', twelve: '', alpha: '' }, s.sym || {});
+      /* alte Version: ein Schlüssel und ein Symbol für Alpha Vantage */
+      if (s.apiKey && !b.settings.keys.alpha) b.settings.keys.alpha = s.apiKey;
+      if (s.symbol && !b.settings.sym.alpha) b.settings.sym.alpha = s.symbol;
+      Object.assign(b.cache, d.cache || {});
+      b.cache.limits = Object.assign({}, (d.cache && d.cache.limits) || {});
+      if (d.cache && d.cache.limitDate && !b.cache.limits.alpha) b.cache.limits.alpha = d.cache.limitDate;
+      if (d.cache && d.cache.symbol && d.cache.symbol === s.symbol && !b.cache.sig) { b.cache.sig = sigOf(b.settings.sym); b.cache.source = b.cache.source || 'alpha'; }
+      Object.assign(b.usage, d.usage || {});
       b.log = Array.isArray(d.log) ? d.log : [];
     }
   } catch (e) {}
@@ -183,7 +207,7 @@ function applyTheme() {
   if (t === 'light' || t === 'dark') el.setAttribute('data-theme', t); else el.removeAttribute('data-theme');
 }
 
-/* Anfragen-Zähler (nur für dieses Gerät) */
+/* Anfragen-Zähler für Alpha Vantage (nur dieses Gerät) */
 function bump() {
   const t = ds(today());
   if (S.usage.date !== t) S.usage = { date: t, n: 0 };
@@ -229,71 +253,162 @@ function status(a) {
   const bought = S.log.find(e => e.window === win.key);
   const lastDay = ds(t) === ds(win.end);
   if (bought) return { color: 'blue', icon: '✓', title: 'Erledigt', text: 'In diesem Zeitfenster hast du schon gekauft.' };
-  if (!a) return { color: 'gray', icon: '…', title: 'Keine Daten', text: 'Kursdaten fehlen noch. Prüfe unten den Datenabruf.' };
+  if (!a) return { color: 'gray', icon: '…', title: 'Keine Daten', text: 'Kursdaten fehlen noch. Prüfe unten die Datenquelle.' };
   if (a.green) return { color: 'green', icon: '✓', title: 'Jetzt kaufen', text: 'Der Trend steigt und der Kurs hat nach einem Rücksetzer die 20-Tage-Linie erreicht.' };
   if (lastDay) return { color: 'orange', icon: '!', title: 'Letzter Tag', text: 'Heute endet das Zeitfenster. Kaufe heute, auch ohne Signal.' };
   if (!a.trendUp) return { color: 'red', icon: '↓', title: 'Trend fällt', text: 'Die 30-Wochen-Linie fällt. Warte, bis das Fenster endet.' };
   return { color: 'orange', icon: '…', title: 'Noch warten', text: 'Der Trend ist gut, aber der Kurs ist noch nicht zurückgekommen.' };
 }
 
-/* ---------- Datenabruf ---------- */
-function limitError(detail) {
-  const e = new Error('limit'); e.limit = true; e.detail = detail || ''; return e;
+/* ---------- Datenquellen ---------- */
+function limitError(detail) { const e = new Error('limit'); e.limit = true; e.detail = detail || ''; return e; }
+function limitText(detail, p) {
+  const m = (detail || '').toLowerCase();
+  if (m.includes('per minute') || m.includes('minute') || m.includes('burst'))
+    return 'Zu viele Anfragen in kurzer Zeit. Eine Minute warten.';
+  return 'Tageslimit erreicht.';
 }
+
+/* Direkt abfragen. Blockiert der Browser die Anfrage (CORS), optional über einen öffentlichen Proxy. */
+async function fetchJSON(url, proxyOK) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return { j: await r.json(), via: '' };
+  } catch (e) {
+    if (!proxyOK || !(e instanceof TypeError)) throw e;
+    const r = await fetch('https://api.allorigins.win/raw?url=' + enc(url));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return { j: await r.json(), via: 'Proxy' };
+  }
+}
+
+function dedupe(list) {
+  const m = new Map();
+  list.forEach(x => m.set(x.d, x));
+  return [...m.values()].sort((a, b) => a.d < b.d ? -1 : 1);
+}
+
+/* Yahoo Finance: ohne Schlüssel, aktueller Kurs steckt im letzten Tagesbalken */
+async function yahooSeries(sym, range, interval) {
+  const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + enc(sym) + '?range=' + range + '&interval=' + interval + '&includePrePost=false';
+  const { j, via } = await fetchJSON(url, true);
+  const res = j && j.chart && j.chart.result && j.chart.result[0];
+  if (!res) throw new Error((j && j.chart && j.chart.error && j.chart.error.description) || 'Symbol bei Yahoo unbekannt');
+  const off = (res.meta && res.meta.gmtoffset) || 0, ts = res.timestamp || [];
+  const cl = ((res.indicators && res.indicators.quote && res.indicators.quote[0]) || {}).close || [];
+  const out = [];
+  ts.forEach((t, i) => {
+    const c = cl[i];
+    if (c == null || !isFinite(c)) return;
+    const d = new Date((t + off) * 1000);
+    out.push({ d: d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()), c });
+  });
+  return { series: dedupe(out), meta: res.meta || {}, via };
+}
+async function fromYahoo(sym) {
+  const d = await yahooSeries(sym, '1y', '1d');
+  const w = await yahooSeries(sym, '2y', '1wk');
+  return { daily: d.series, weekly: w.series, via: d.via, liveTime: (d.meta.regularMarketTime || 0) * 1000, currency: d.meta.currency || '' };
+}
+
+/* Twelve Data: Schlüssel nötig, Gratis-Plan hat Limits und nicht jede Börse */
+async function twelveSeries(sym, key, interval, size) {
+  const url = 'https://api.twelvedata.com/time_series?symbol=' + enc(sym) + '&interval=' + interval + '&outputsize=' + size + '&apikey=' + enc(key);
+  const { j } = await fetchJSON(url, false);
+  if (j.status === 'error') {
+    if (j.code === 429) throw limitError(j.message);
+    throw new Error(j.message || 'Fehler bei Twelve Data');
+  }
+  return dedupe((j.values || []).map(v => ({ d: String(v.datetime).slice(0, 10), c: parseFloat(v.close) })).filter(x => isFinite(x.c)));
+}
+async function fromTwelve(sym, key) {
+  const daily = await twelveSeries(sym, key, '1day', 120);
+  const weekly = await twelveSeries(sym, key, '1week', 60);
+  return { daily, weekly, via: '', liveTime: 0, currency: '' };
+}
+
+/* Alpha Vantage */
 async function av(fn, sym, key, extra) {
-  const url = 'https://www.alphavantage.co/query?function=' + fn + '&symbol=' + encodeURIComponent(sym) + (extra || '') + '&apikey=' + encodeURIComponent(key);
+  const url = 'https://www.alphavantage.co/query?function=' + fn + '&symbol=' + enc(sym) + (extra || '') + '&apikey=' + enc(key);
   bump();
-  const r = await fetch(url);
-  if (!r.ok) throw new Error('Verbindungsfehler (HTTP ' + r.status + ')');
-  const j = await r.json();
-  if (j['Error Message']) throw new Error('Symbol unbekannt. Wähle den ETF in den Einstellungen neu aus.');
+  const { j } = await fetchJSON(url, false);
+  if (j['Error Message']) throw new Error('Symbol unbekannt');
   if (j.Note || j.Information) throw limitError(j.Note || j.Information);
   const series = j['Time Series (Daily)'] || j['Weekly Time Series'];
   if (!series) throw new Error('Keine Daten erhalten');
   return Object.keys(series).sort().map(d => ({ d, c: parseFloat(series[d]['4. close']) })).filter(x => isFinite(x.c));
 }
-function limitText(detail) {
-  const m = (detail || '').toLowerCase();
-  if (m.includes('per minute') || m.includes('calls per minute') || m.includes('burst'))
-    return 'Zu viele Anfragen in kurzer Zeit. Warte eine Minute und aktualisiere dann erneut.';
-  return 'Das Tageslimit von Alpha Vantage ist erreicht. Neue Kurse gibt es erst nach dem Zurücksetzen, in der Regel am nächsten Tag.';
+async function fromAlpha(sym, key) {
+  const daily = await av('TIME_SERIES_DAILY', sym, key, '&outputsize=compact');
+  const weekly = await av('TIME_SERIES_WEEKLY', sym, key, '');
+  return { daily, weekly, via: '', liveTime: 0, currency: '' };
 }
 
+function available(p) {
+  const st = S.settings;
+  return !!st.sym[p] && (!PROV[p].needsKey || !!st.keys[p]);
+}
+function order() {
+  const st = S.settings;
+  return (st.provider === 'auto' ? ORDER : [st.provider]).filter(available);
+}
+function fetchSource(p) {
+  const st = S.settings;
+  if (p === 'yahoo') return fromYahoo(st.sym.yahoo);
+  if (p === 'twelve') return fromTwelve(st.sym.twelve, st.keys.twelve);
+  return fromAlpha(st.sym.alpha, st.keys.alpha);
+}
+const anyLimitToday = () => Object.values(S.cache.limits || {}).some(v => v === ds(today()));
+
 async function refresh(force) {
-  const st = S.settings, c = S.cache;
-  if (!st.apiKey || !st.symbol) {
-    c.error = 'Bitte Schlüssel und ETF in den Einstellungen eintragen.'; c.detail = '';
-    render(); return;
+  const st = S.settings, list = order(), sig = sigOf(st.sym);
+  let c = S.cache;
+  if (!list.length) { c.error = 'Bitte in den Einstellungen eine Datenquelle einrichten.'; c.detail = ''; render(); return; }
+  const same = c.sig === sig && c.daily.length;
+  if (!force && same) {
+    const fresh = c.source === 'yahoo' ? Date.now() - c.at < YAHOO_TTL : c.fetched === ds(today());
+    if (fresh) { render(); return; }
   }
-  if (!force && c.fetched === ds(today()) && c.symbol === st.symbol && c.daily.length) { render(); return; }
-  /* Nach einem Limit-Fehler am selben Tag nicht automatisch erneut anfragen, das verbraucht nur Anfragen. */
-  if (!force && c.limitDate === ds(today()) && c.symbol === st.symbol) { render(); return; }
+  if (busy) return;
   busy = true; render();
-  try {
-    const daily = await av('TIME_SERIES_DAILY', st.symbol, st.apiKey, '&outputsize=compact');
-    const weekly = await av('TIME_SERIES_WEEKLY', st.symbol, st.apiKey, '');
-    S.cache = { fetched: ds(today()), symbol: st.symbol, daily, weekly, error: '', detail: '', limitDate: '' };
-  } catch (err) {
-    if (c.symbol !== st.symbol) { c.daily = []; c.weekly = []; c.fetched = ''; }
-    const keep = c.daily.length ? ' Angezeigt wird der letzte gespeicherte Stand.' : '';
-    if (err.limit) { c.limitDate = ds(today()); c.error = limitText(err.detail) + keep; c.detail = err.detail; }
-    else { c.error = err.message + keep; c.detail = ''; }
+  const errs = []; let detail = '';
+  for (const p of list) {
+    if (!force && c.limits[p] === ds(today())) { errs.push(PROV[p].name + ': Limit heute erreicht'); continue; }
+    try {
+      const r = await fetchSource(p);
+      if (r.daily.length < 2) throw new Error('Zu wenige Kursdaten');
+      const limits = Object.assign({}, c.limits); limits[p] = '';
+      S.cache = { fetched: ds(today()), at: Date.now(), source: p, via: r.via || '', sig, daily: r.daily, weekly: r.weekly,
+                  error: '', detail: '', limits, liveTime: r.liveTime || 0, currency: r.currency || '' };
+      busy = false; save(); render(); return;
+    } catch (err) {
+      if (err.limit) { c.limits[p] = ds(today()); detail = err.detail; errs.push(PROV[p].name + ': ' + limitText(err.detail, p)); }
+      else errs.push(PROV[p].name + ': ' + (err instanceof TypeError ? 'Verbindung nicht möglich (offline oder blockiert)' : err.message));
+    }
   }
+  if (c.sig !== sig) { c.daily = []; c.weekly = []; c.fetched = ''; c.source = ''; c.at = 0; c.sig = sig; }
+  c.error = errs.join('\n') + (c.daily.length ? '\nAngezeigt wird der letzte gespeicherte Stand.' : '');
+  c.detail = detail;
   busy = false; save(); render();
 }
 
-async function search(q) {
+async function search(src, q) {
   const st = S.settings;
-  if (!st.apiKey) { msg = 'Bitte zuerst den Schlüssel eintragen und speichern.'; msgType = 'err'; render(); return; }
   if (!q.trim()) return;
   try {
-    bump();
-    const r = await fetch('https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=' + encodeURIComponent(q) + '&apikey=' + encodeURIComponent(st.apiKey));
-    const j = await r.json();
-    if (j.Note || j.Information) throw limitError(j.Note || j.Information);
-    results = (j.bestMatches || []).slice(0, 8).map(m => ({ symbol: m['1. symbol'], name: m['2. name'], region: m['4. region'], currency: m['8. currency'] }));
+    if (src === 'yahoo') {
+      const { j } = await fetchJSON('https://query2.finance.yahoo.com/v1/finance/search?q=' + enc(q) + '&quotesCount=8&newsCount=0', true);
+      results = (j.quotes || []).filter(x => x.symbol).slice(0, 8).map(x => ({ src, symbol: x.symbol, name: x.longname || x.shortname || x.symbol, region: x.exchDisp || x.exchange || '', currency: '' }));
+    } else {
+      if (!st.keys.alpha) { msg = 'Bitte zuerst den Alpha-Vantage-Schlüssel eintragen und speichern.'; msgType = 'err'; render(); return; }
+      bump();
+      const { j } = await fetchJSON('https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=' + enc(q) + '&apikey=' + enc(st.keys.alpha), false);
+      if (j.Note || j.Information) throw limitError(j.Note || j.Information);
+      results = (j.bestMatches || []).slice(0, 8).map(m => ({ src, symbol: m['1. symbol'], name: m['2. name'], region: m['4. region'], currency: m['8. currency'] }));
+    }
     if (!results.length) { msg = 'Keine Treffer.'; msgType = 'err'; }
-  } catch (err) { msg = err.limit ? limitText(err.detail) : 'Suche fehlgeschlagen: ' + err.message; msgType = 'err'; }
+  } catch (err) { results = []; msg = err.limit ? 'Limit erreicht. ' + limitText(err.detail) : 'Suche fehlgeschlagen: ' + err.message; msgType = 'err'; }
   render();
 }
 
@@ -309,9 +424,13 @@ function buy() {
 }
 
 function saveSettings() {
-  const g = id => document.getElementById(id).value.replace(',', '.');
+  const g = id => (document.getElementById(id) || { value: '' }).value.replace(',', '.');
   const st = S.settings;
-  st.apiKey = g('key').trim();
+  st.keys.alpha = g('key').trim();
+  st.keys.twelve = g('tkey').trim();
+  st.sym.yahoo = g('ysym').trim();
+  st.sym.twelve = g('tsym').trim();
+  st.sym.alpha = g('asym').trim();
   st.budget = parseFloat(g('bud')) || 1000;
   st.tolUp = parseFloat(g('tu')) || 0;
   st.tolDown = parseFloat(g('td')) || 0;
@@ -341,7 +460,6 @@ function chart(a) {
   const X = k => x0 + k / (d.length - 1) * (x1 - x0);
   const Y = v => y1 - (v - mn) / sp * (y1 - y0);
   const dec = sp < 5 ? 2 : sp < 30 ? 1 : 0;
-
   const line = arr => {
     let p = '', pen = false;
     arr.forEach((v, k) => {
@@ -354,7 +472,6 @@ function chart(a) {
   const closes = d.map(x => x.c);
   const pricePath = line(closes);
   const area = pricePath + 'L' + X(d.length - 1).toFixed(1) + ' ' + y1 + ' L' + X(0).toFixed(1) + ' ' + y1 + ' Z';
-
   let grid = '';
   for (let i = 0; i < 4; i++) {
     const v = mn + sp * i / 3, y = Y(v).toFixed(1);
@@ -366,7 +483,6 @@ function chart(a) {
     const tx = p[1] === 'start' ? x0 : p[1] === 'end' ? x1 : X(p[0]);
     return '<text x="' + tx.toFixed(1) + '" y="' + (y1 + 18) + '" text-anchor="' + p[1] + '">' + dt(parseD(d[p[0]].d)) + '</text>';
   }).join('');
-
   const lastX = X(d.length - 1).toFixed(1), lastY = Y(closes[closes.length - 1]).toFixed(1);
   return '<svg viewBox="0 0 ' + Wd + ' ' + H + '" role="img" aria-label="Kursverlauf" style="color:var(--label)">' +
     '<defs><linearGradient id="ga" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a84ff" stop-opacity=".38"/><stop offset="1" stop-color="#0a84ff" stop-opacity="0"/></linearGradient>' +
@@ -395,7 +511,7 @@ function chartCard(a) {
   return '<div class="sec">Kursverlauf</div>' +
     '<div class="group"><div class="seg">' + seg + '</div>' +
     '<div class="chartbox">' + chart(a) + '</div>' +
-    '<div class="row"><span class="l"><i class="dot" style="background:#0a84ff;color:#0a84ff"></i>Kurs</span><span class="v strong">' + num(a.close) + '</span></div>' +
+    '<div class="row"><span class="l"><i class="dot" style="background:#0a84ff;color:#0a84ff"></i>Kurs</span><span class="v strong">' + num(a.close) + (S.cache.currency ? ' ' + esc(S.cache.currency) : '') + '</span></div>' +
     '<div class="row"><span class="l"><i class="dot" style="background:#ff9f0a;color:#ff9f0a"></i><span>20-Tage-Linie<small>Durchschnitt der letzten 20 Handelstage</small></span></span><span class="v strong">' + num(a.s20) + '</span></div>' +
     '<div class="row"><span class="l"><i class="dot" style="background:#ff453a;color:#ff453a"></i><span>30-Wochen-Linie, gestrichelt<small>' + (wInRange ? 'Langfristiger Trend' : 'Liegt außerhalb des Ausschnitts') + '</small></span></span><span class="v strong">' + num(a.w30now) + '</span></div></div>';
 }
@@ -405,8 +521,9 @@ function banner() {
   return msg ? '<div class="' + (msgType === 'err' ? 'alert' : 'ok-msg') + '">' + esc(msg) + '</div>' : '';
 }
 function title(t) {
-  const st = S.settings;
-  return '<h1>' + esc(t) + '</h1><div class="sub">' + esc(st.name || 'Noch kein ETF gewählt') + (S.cache.fetched ? ' · Stand ' + parseD(S.cache.fetched).toLocaleDateString('de-DE') : '') + '</div>';
+  const st = S.settings, c = S.cache;
+  const when = c.at ? stamp(c.at) : c.fetched ? parseD(c.fetched).toLocaleDateString('de-DE') : '';
+  return '<h1>' + esc(t) + '</h1><div class="sub">' + esc(st.name || 'Noch kein ETF gewählt') + (when ? ' · Stand ' + when : '') + '</div>';
 }
 
 function checks(a) {
@@ -421,20 +538,27 @@ function checks(a) {
     '</div><div class="foot">Alle drei Punkte müssen erfüllt sein, damit die Anzeige auf „Jetzt kaufen“ springt.</div>';
 }
 
-/* Alles zum Limit an einer Stelle */
 function limitCard() {
-  const c = S.cache, n = usedToday(), pct = Math.min(100, n / FREE_LIMIT * 100);
-  const hit = c.limitDate === ds(today());
-  const rows =
-    '<div class="row"><span class="k">Anfragen heute<small>Zähler nur für dieses Gerät</small></span><span class="v strong">' + n + ' von ' + FREE_LIMIT + '</span></div>' +
-    '<div class="row" style="display:block;padding-top:0;min-height:0;padding-bottom:14px"><div class="bar' + (n >= FREE_LIMIT ? ' full' : '') + '"><i style="width:' + pct + '%"></i></div></div>' +
-    '<div class="row"><span class="k">Status</span><span class="v strong" style="color:' + (hit ? 'var(--red)' : 'var(--green)') + '">' + (hit ? 'Limit erreicht' : 'In Ordnung') + '</span></div>' +
-    '<div class="row"><span class="k">Letzter erfolgreicher Abruf</span><span class="v strong">' + (c.fetched ? parseD(c.fetched).toLocaleDateString('de-DE') : '–') + '</span></div>';
-  return '<div class="sec">Datenabruf und Limit</div><div class="group">' + rows + '</div>' +
-    '<div class="foot"><b>So funktioniert das Limit:</b> Der kostenlose Alpha-Vantage-Schlüssel erlaubt etwa 25 Anfragen pro Tag und 5 pro Minute. ' +
-    'Eine Aktualisierung braucht 2 Anfragen (Tageskurse und Wochenkurse), eine ETF-Suche 1 Anfrage. ' +
-    'Die App ruft pro Tag nur einmal automatisch ab und fragt nach einem Limit-Fehler am selben Tag nicht mehr von selbst an. ' +
-    'Der Zähler zählt nur Anfragen von diesem Gerät. Hat derselbe Schlüssel auch woanders Anfragen verbraucht, kann das Limit früher erreicht sein.</div>';
+  const c = S.cache, st = S.settings, n = usedToday(), pct = Math.min(100, n / FREE_LIMIT * 100);
+  const src = c.source ? PROV[c.source].name + (c.via ? ' (über ' + c.via + ')' : '') : '–';
+  let rows =
+    '<div class="row"><span class="k">Aktuelle Quelle</span><span class="v strong">' + esc(src) + '</span></div>' +
+    '<div class="row"><span class="k">Zuletzt aktualisiert</span><span class="v strong">' + (c.at ? stamp(c.at) : '–') + '</span></div>' +
+    '<div class="row"><span class="k">Modus</span><span class="v strong">' + (st.provider === 'auto' ? 'Automatisch' : esc(PROV[st.provider].name)) + '</span></div>';
+  if (st.keys.alpha) {
+    rows += '<div class="row"><span class="k">Alpha Vantage heute<small>Zähler nur für dieses Gerät</small></span><span class="v strong">' + n + ' von ' + FREE_LIMIT + '</span></div>' +
+      '<div class="row" style="display:block;padding-top:0;min-height:0;padding-bottom:14px"><div class="bar' + (n >= FREE_LIMIT ? ' full' : '') + '"><i style="width:' + pct + '%"></i></div></div>';
+  }
+  ORDER.forEach(p => {
+    if (c.limits && c.limits[p] === ds(today()))
+      rows += '<div class="row"><span class="k">' + PROV[p].name + '</span><span class="v strong" style="color:var(--red)">Limit erreicht</span></div>';
+  });
+  return '<div class="sec">Datenquelle und Limit</div><div class="group">' + rows + '</div>' +
+    '<div class="foot"><b>Yahoo Finance</b> braucht keinen Schlüssel und hat kein festes Tageslimit. Die Schnittstelle ist inoffiziell, Kurse können leicht verzögert sein. ' +
+    'Solange die App offen ist, wird alle 15 Minuten aktualisiert. Blockiert der Browser die Direktabfrage, läuft sie über einen öffentlichen Proxy, dabei wird nur das ETF-Symbol übertragen.<br><br>' +
+    '<b>Alpha Vantage</b> (gratis): etwa 25 Anfragen pro Tag und 5 pro Minute. Eine Aktualisierung braucht 2 Anfragen, eine Suche 1. Nach einem Limit-Fehler fragt die App am selben Tag nicht mehr von selbst an. ' +
+    '<b>Twelve Data</b> (gratis): 8 pro Minute und 800 pro Tag, aber nicht jede Börse.<br><br>' +
+    'Im Modus „Automatisch“ nimmt die App die Quellen der Reihe nach (Yahoo, Twelve Data, Alpha Vantage) und nutzt die erste, die Daten liefert.</div>';
 }
 
 function todayView() {
@@ -446,17 +570,14 @@ function todayView() {
   let h = title('Heute') + banner();
   h += '<div class="hero"><div class="badge ' + s.color + '">' + s.icon + '</div><b>' + esc(s.title) + '</b><span>' + esc(s.text) + '</span></div>';
   if (S.cache.error) {
-    h += '<div class="alert"><b>' + (S.cache.limitDate === ds(today()) ? 'Limit erreicht' : 'Abruf fehlgeschlagen') + '</b>' + esc(S.cache.error) +
-      (S.cache.detail ? '<small>Meldung von Alpha Vantage: ' + esc(S.cache.detail) + '</small>' : '') + '</div>';
+    h += '<div class="alert"><b>' + (anyLimitToday() ? 'Limit erreicht' : 'Abruf fehlgeschlagen') + '</b>' + esc(S.cache.error).replace(/\n/g, '<br>') +
+      (S.cache.detail ? '<small>Meldung des Anbieters: ' + esc(S.cache.detail) + '</small>' : '') + '</div>';
   }
-
   h += '<div class="sec">Aktuelles Fenster</div><div class="group">' +
     '<div class="row"><span class="k">Zeitraum</span><span class="v strong">' + winText + '</span></div>' +
     '<div class="row"><span class="k">Noch</span><span class="v strong">' + (days > 0 ? days + (days === 1 ? ' Tag' : ' Tage') : 'Heute letzter Tag') + '</span></div>' +
     '<div class="row"><span class="k">Betrag</span><span class="v strong">' + num(half, 0) + ' €</span></div></div>';
-
   if (a) h += checks(a);
-
   if (bought) {
     h += '<div class="sec">Kauf</div><div class="group"><div class="row"><span class="k">Gekauft am ' + esc(bought.date) + '</span><span class="v strong">' + num(bought.price) + '</span></div></div>';
   } else if (a) {
@@ -464,7 +585,7 @@ function todayView() {
       '<div class="field"><label for="bp">Kurs</label><input id="bp" inputmode="decimal" value="' + a.close.toFixed(2) + '"></div>' +
       '<div class="field"><label for="ba">Betrag in €</label><input id="ba" inputmode="decimal" value="' + half + '"></div></div>' +
       '<button class="btn" data-a="buy">Kauf speichern</button>' +
-      '<div class="foot">Der Kurs ist der letzte Schlusskurs. Passe ihn an, wenn du anders gekauft hast.</div>';
+      '<div class="foot">Der Kurs ist der zuletzt geladene Kurs. Passe ihn an, wenn du anders gekauft hast.</div>';
   }
   if (a) h += chartCard(a);
   h += limitCard();
@@ -490,22 +611,38 @@ function logView() {
   return h;
 }
 
+function resultGroup(src) {
+  if (!results.length || results[0].src !== src) return '';
+  return '<div class="sec">Treffer</div><div class="group">' + results.map(r =>
+    '<div class="row"><span class="k">' + esc(r.symbol) + '<small>' + esc(r.name) + (r.region ? ' · ' + esc(r.region) : '') + (r.currency ? ' · ' + esc(r.currency) : '') + '</small></span>' +
+    '<button class="link" data-a="pick" data-src="' + r.src + '" data-s="' + esc(r.symbol) + '" data-n="' + esc(r.name) + '">Wählen</button></div>').join('') + '</div>';
+}
+
 function settingsView() {
   const st = S.settings;
-  const th = [['auto', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']]
-    .map(x => '<button class="' + (st.theme === x[0] ? 'on' : '') + '" data-a="theme" data-v="' + x[0] + '">' + x[1] + '</button>').join('');
+  const seg = (arr, cur, act) => '<div class="seg" style="margin:12px 16px 12px">' + arr.map(x =>
+    '<button class="' + (cur === x[0] ? 'on' : '') + '" data-a="' + act + '" data-v="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
   return title('Einstellungen') + banner() +
-    '<div class="sec">Darstellung</div><div class="group"><div class="seg" style="margin:12px 16px 12px">' + th + '</div></div>' +
+    '<div class="sec">Darstellung</div><div class="group">' + seg([['auto', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']], st.theme, 'theme') + '</div>' +
+    '<div class="sec">Datenquelle</div><div class="group">' + seg([['auto', 'Auto'], ['yahoo', 'Yahoo'], ['twelve', 'Twelve'], ['alpha', 'Alpha']], st.provider, 'prov') + '</div>' +
+    '<div class="foot">Auto probiert die Quellen der Reihe nach und nimmt die erste, die klappt. Jede Quelle braucht ihr eigenes Symbol, weil dasselbe Wertpapier je nach Anbieter anders heißt.</div>' +
+
+    '<div class="sec">Yahoo Finance · ohne Schlüssel</div><div class="group">' +
+    '<div class="field"><label for="ysym">Symbol</label><input id="ysym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYY.DE" value="' + esc(st.sym.yahoo) + '"></div>' +
+    '<div class="field"><label for="qy">Suche</label><input id="qy" autocomplete="off" placeholder="Name oder ISIN"></div></div>' +
+    '<button class="btn sec2" data-a="search" data-src="yahoo">Bei Yahoo suchen</button>' + resultGroup('yahoo') +
+
+    '<div class="sec">Twelve Data</div><div class="group">' +
+    '<div class="field"><label for="tkey">Schlüssel</label><input id="tkey" type="password" autocomplete="off" placeholder="API-Schlüssel" value="' + esc(st.keys.twelve) + '"></div>' +
+    '<div class="field"><label for="tsym">Symbol</label><input id="tsym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYY" value="' + esc(st.sym.twelve) + '"></div></div>' +
+
     '<div class="sec">Alpha Vantage</div><div class="group">' +
-    '<div class="field"><label for="key">Schlüssel</label><input id="key" type="password" autocomplete="off" placeholder="API-Schlüssel" value="' + esc(st.apiKey) + '"></div></div>' +
-    '<div class="foot">Der Schlüssel bleibt nur auf diesem Gerät. Kostenlos sind etwa 25 Anfragen pro Tag, mehr dazu auf „Heute“ unter „Datenabruf und Limit“.</div>' +
-    '<div class="sec">ETF</div><div class="group">' +
-    '<div class="row"><span class="k">Aktuell</span><span class="v strong">' + esc(st.symbol || 'keiner') + '</span></div>' +
-    '<div class="field"><label for="q">Suche</label><input id="q" autocomplete="off" placeholder="Name, z. B. SPDR MSCI ACWI IMI"></div></div>' +
-    '<button class="btn sec2" data-a="search">Suchen (1 Anfrage)</button>' +
-    (results.length ? '<div class="sec">Treffer</div><div class="group">' + results.map(r =>
-      '<div class="row"><span class="k">' + esc(r.symbol) + '<small>' + esc(r.name) + ' · ' + esc(r.region) + ' · ' + esc(r.currency) + '</small></span>' +
-      '<button class="link" data-a="pick" data-s="' + esc(r.symbol) + '" data-n="' + esc(r.name) + '">Wählen</button></div>').join('') + '</div>' : '') +
+    '<div class="field"><label for="key">Schlüssel</label><input id="key" type="password" autocomplete="off" placeholder="API-Schlüssel" value="' + esc(st.keys.alpha) + '"></div>' +
+    '<div class="field"><label for="asym">Symbol</label><input id="asym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYY.DEX" value="' + esc(st.sym.alpha) + '"></div>' +
+    '<div class="field"><label for="qa">Suche</label><input id="qa" autocomplete="off" placeholder="Name"></div></div>' +
+    '<button class="btn sec2" data-a="search" data-src="alpha">Bei Alpha Vantage suchen (1 Anfrage)</button>' + resultGroup('alpha') +
+    '<div class="foot">Schlüssel bleiben nur auf diesem Gerät.</div>' +
+
     '<div class="sec">Strategie</div><div class="group">' +
     '<div class="field"><label for="bud">Budget pro Monat (€)</label><input id="bud" inputmode="decimal" value="' + st.budget + '"></div>' +
     '<div class="field"><label for="tu">Toleranz über 20er-Linie (%)</label><input id="tu" inputmode="decimal" value="' + st.tolUp + '"></div>' +
@@ -525,6 +662,7 @@ function tabbar() {
 }
 
 function render() {
+  const keep = document.activeElement && document.activeElement.id;
   const body = view === 'einstellungen' ? settingsView() : view === 'verlauf' ? logView() : todayView();
   document.getElementById('app').innerHTML = body + tabbar();
 }
@@ -533,25 +671,33 @@ document.addEventListener('click', async e => {
   const t = e.target.closest('[data-a]');
   if (!t) return;
   const a = t.dataset.a;
-  if (a !== 'search' && a !== 'refresh' && a !== 'range' && a !== 'theme') msg = '';
+  if (!['search', 'refresh', 'range', 'theme', 'prov'].includes(a)) msg = '';
   if (a === 'tab') { view = t.dataset.v; window.scrollTo(0, 0); render(); }
   else if (a === 'range') { range = Number(t.dataset.n); render(); }
   else if (a === 'theme') { S.settings.theme = t.dataset.v; save(); applyTheme(); render(); }
+  else if (a === 'prov') { S.settings.provider = t.dataset.v; save(); render(); }
   else if (a === 'refresh') { await refresh(true); }
   else if (a === 'buy') { buy(); }
   else if (a === 'del') {
     if (confirm('Eintrag löschen?')) { S.log = S.log.filter(x => String(x.id) !== t.dataset.id); save(); render(); }
   }
-  else if (a === 'search') { await search(document.getElementById('q').value); }
+  else if (a === 'search') {
+    const src = t.dataset.src, el = document.getElementById(src === 'yahoo' ? 'qy' : 'qa');
+    await search(src, el ? el.value : '');
+  }
   else if (a === 'pick') {
-    S.settings.symbol = t.dataset.s; S.settings.name = t.dataset.n; results = [];
+    S.settings.sym[t.dataset.src] = t.dataset.s; S.settings.name = t.dataset.n; results = [];
     msg = 'ETF gewählt.'; msgType = 'ok'; save(); view = 'heute'; await refresh(true);
   }
   else if (a === 'save') { saveSettings(); }
 });
 
+/* Live-Aktualisierung: alle 5 Minuten prüfen, geladen wird nur, wenn die Daten älter als 15 Minuten sind */
+setInterval(() => { if (!document.hidden && view === 'heute' && !busy) refresh(false); }, 5 * 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && view === 'heute' && !busy) refresh(false); });
+
 applyTheme();
-if (!S.settings.apiKey || !S.settings.symbol) view = 'einstellungen';
+if (!order().length) view = 'einstellungen';
 render();
 refresh(false);
 </script>
