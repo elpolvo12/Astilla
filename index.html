@@ -154,7 +154,25 @@ html{overscroll-behavior-y:contain}
 .hero.compact .badge{width:38px;height:38px;font-size:20px;margin:0;flex:none;box-shadow:0 4px 12px color-mix(in srgb,var(--c) 50%,transparent),inset 0 1px 2px rgba(255,255,255,.6),inset 0 -3px 6px rgba(0,0,0,.12)}
 .hero.compact b{font-size:17px}
 .hero.compact span{font-size:13px;margin-top:1px;line-height:1.3}
-.pricehead{position:relative;z-index:1;padding:16px 18px 0}
+.pricehead{position:relative;z-index:1;padding:14px 16px 0 18px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.pill{--c:var(--gray);display:inline-flex;align-items:center;gap:7px;padding:7px 12px;margin-top:4px;border-radius:999px;font:inherit;font-size:13px;font-weight:700;color:var(--c);cursor:pointer;white-space:nowrap;
+  background:color-mix(in srgb,var(--c) 16%,transparent);border:1px solid color-mix(in srgb,var(--c) 40%,transparent);
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 8px var(--c)}
+.pill em{font-style:normal;opacity:.7;transition:transform .2s;display:inline-block}
+.pill.open em{transform:rotate(90deg)}
+.pill:active{opacity:.7}
+.infopanel{position:relative;z-index:1;margin:10px 14px 0;padding:14px 16px;border-radius:20px;background:var(--fill);animation:pop .22s ease}
+@keyframes pop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.infopanel>b{display:block;font-size:17px}
+.infopanel>p{margin:3px 0 8px;color:var(--label2);font-size:14px;line-height:1.35}
+.crow{display:flex;align-items:flex-start;gap:10px;padding:6px 0}
+.crow .chk{width:22px;height:22px;font-size:12px;margin:1px 0 0}
+.crow small{display:block;color:var(--label2);font-size:12.5px;line-height:1.3}
+.infopanel .note{margin:8px 0 0;padding-top:8px;border-top:.5px solid var(--sep);font-size:12.5px;color:var(--label2);line-height:1.35}
+.legend{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:6px 18px;padding:2px 18px 14px;font-size:13px;color:var(--label2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend b{color:var(--label);font-weight:600}
 .pricehead .big{font-size:38px;font-weight:700;letter-spacing:.2px;line-height:1.1}
 .pricehead .big small{font-size:17px;font-weight:600;color:var(--label2);margin-left:6px}
 .pricehead .chg{font-size:15px;font-weight:600;margin-top:2px}
@@ -231,7 +249,7 @@ function load() {
 function save() { localStorage.setItem(KEY, JSON.stringify(S)); }
 
 let S = load();
-let view = 'heute', busy = false, msg = '', msgType = 'ok', results = [], range = 60;
+let infoOpen = false, view = 'heute', busy = false, msg = '', msgType = 'ok', results = [], range = 60;
 
 function applyTheme() {
   const t = S.settings.theme, el = document.documentElement;
@@ -296,13 +314,13 @@ function status(a) {
   const t = today(), win = windowOf(t);
   const bought = S.log.find(e => e.window === win.key);
   const lastDay = ds(t) === ds(win.end);
-  if (bought) return { color: 'blue', icon: '✓', title: 'Erledigt', text: 'In diesem Zeitfenster hast du schon gekauft.' };
-  if (busy && !a) return { color: 'blue', icon: '…', title: 'Lädt Kurse …', text: 'Einen Moment bitte.' };
-  if (!a) return { color: 'gray', icon: '…', title: 'Keine Daten', text: 'Kursdaten fehlen noch. Prüfe unten die Datenquelle.' };
-  if (a.green) return { color: 'green', icon: '✓', title: 'Jetzt kaufen', text: 'Der Trend steigt und der Kurs hat nach einem Rücksetzer die 20-Tage-Linie erreicht.' };
-  if (lastDay) return { color: 'orange', icon: '!', title: 'Letzter Tag', text: 'Heute endet das Zeitfenster. Kaufe heute, auch ohne Signal.' };
-  if (!a.trendUp) return { color: 'red', icon: '↓', title: 'Trend fällt', text: 'Die 30-Wochen-Linie fällt. Warte, bis das Fenster endet.' };
-  return { color: 'orange', icon: '…', title: 'Noch warten', text: 'Der Trend ist gut, aber der Kurs ist noch nicht zurückgekommen.' };
+  if (bought) return { short: 'Erledigt', color: 'blue', icon: '✓', title: 'Erledigt', text: 'In diesem Zeitfenster hast du schon gekauft.' };
+  if (busy && !a) return { short: 'Lädt …', color: 'blue', icon: '…', title: 'Lädt Kurse …', text: 'Einen Moment bitte.' };
+  if (!a) return { short: 'Keine Daten', color: 'gray', icon: '…', title: 'Keine Daten', text: 'Kursdaten fehlen noch. Prüfe unten die Datenquelle.' };
+  if (a.green) return { short: 'Kaufen', color: 'green', icon: '✓', title: 'Jetzt kaufen', text: 'Der Trend steigt und der Kurs hat nach einem Rücksetzer die 20-Tage-Linie erreicht.' };
+  if (lastDay) return { short: 'Heute kaufen', color: 'orange', icon: '!', title: 'Letzter Tag', text: 'Heute endet das Zeitfenster. Kaufe heute, auch ohne Signal.' };
+  if (!a.trendUp) return { short: 'Trend fällt', color: 'red', icon: '↓', title: 'Trend fällt', text: 'Die 30-Wochen-Linie fällt. Warte, bis das Fenster endet.' };
+  return { short: 'Warten', color: 'orange', icon: '…', title: 'Noch warten', text: 'Der Trend ist gut, aber der Kurs ist noch nicht zurückgekommen.' };
 }
 
 /* ---------- Datenquellen ---------- */
@@ -588,14 +606,19 @@ function chartCard(a) {
   const seg = [[30, '1 Monat'], [60, '3 Monate'], [100, 'Alles']]
     .map(r => '<button class="' + (range === r[0] ? 'on' : '') + '" data-a="range" data-n="' + r[0] + '">' + r[1] + '</button>').join('');
   const L = D.length - 1, prev = D[L - 1] ? D[L - 1].c : a.close, chg = (a.close / prev - 1) * 100;
-  const head = '<div class="pricehead"><div class="big">' + num(a.close) + (S.cache.currency ? '<small>' + esc(S.cache.currency) + '</small>' : '') + '</div>' +
-    '<div class="chg ' + (chg >= 0 ? 'up' : 'down') + '">' + (chg >= 0 ? '▲ ' : '▼ ') + num(Math.abs(chg)) + ' % <span>zum Vortag</span></div></div>';
+  const s = status(a);
+  const pill = '<button class="pill' + (infoOpen ? ' open' : '') + '" style="--c:var(--' + ({ green: 'green', orange: 'orange', red: 'red', blue: 'blue', gray: 'gray' }[s.color]) + ')" data-a="info" aria-expanded="' + infoOpen + '"><i></i>' + esc(s.short) + '<em>›</em></button>';
+  const head = '<div class="pricehead"><div><div class="big">' + num(a.close) + (S.cache.currency ? '<small>' + esc(S.cache.currency) + '</small>' : '') + '</div>' +
+    '<div class="chg ' + (chg >= 0 ? 'up' : 'down') + '">' + (chg >= 0 ? '▲ ' : '▼ ') + num(Math.abs(chg)) + ' % <span>zum Vortag</span></div></div>' + pill + '</div>';
+  const panel = infoOpen ? '<div class="infopanel"><b>' + esc(s.title) + '</b><p>' + esc(s.text) + '</p>' + checkRows(a) +
+    '<div class="note">Alle drei Punkte müssen erfüllt sein, damit der Status auf „Kaufen“ springt.<br>' +
+    '<span style="color:#ff9f0a">●</span> 20-Tage-Linie: Durchschnitt der letzten 20 Handelstage.<br>' +
+    '<span style="color:#ff453a">●</span> 30-Wochen-Linie (gestrichelt): langfristiger Trend' + (wInRange ? '' : ', liegt außerhalb des Ausschnitts') + '.</div></div>' : '';
+  const legend = '<div class="legend"><span><i class="dot" style="margin:0;background:#ff9f0a;color:#ff9f0a"></i>20 Tage <b>' + num(a.s20) + '</b></span>' +
+    '<span><i class="dot" style="margin:0;background:#ff453a;color:#ff453a"></i>30 Wochen <b>' + num(a.w30now) + '</b></span></div>';
   return '<div class="sec">Kursverlauf</div>' +
-    '<div class="group">' + head + '<div class="seg">' + seg + '</div>' +
-    '<div class="chartbox">' + chart(a) + '</div>' +
-    '<div class="row"><span class="l"><i class="dot" style="background:#0a84ff;color:#0a84ff"></i>Kurs</span><span class="v strong">' + num(a.close) + (S.cache.currency ? ' ' + esc(S.cache.currency) : '') + '</span></div>' +
-    '<div class="row"><span class="l"><i class="dot" style="background:#ff9f0a;color:#ff9f0a"></i><span>20-Tage-Linie<small>Durchschnitt der letzten 20 Handelstage</small></span></span><span class="v strong">' + num(a.s20) + '</span></div>' +
-    '<div class="row"><span class="l"><i class="dot" style="background:#ff453a;color:#ff453a"></i><span>30-Wochen-Linie, gestrichelt<small>' + (wInRange ? 'Langfristiger Trend' : 'Liegt außerhalb des Ausschnitts') + '</small></span></span><span class="v strong">' + num(a.w30now) + '</span></div></div>';
+    '<div class="group">' + head + panel + '<div class="seg">' + seg + '</div>' +
+    '<div class="chartbox">' + chart(a) + '</div>' + legend + '</div>';
 }
 
 /* ---------- Ansichten ---------- */
@@ -608,16 +631,14 @@ function title(t) {
   return '<h1>' + esc(t) + '</h1><div class="sub">' + esc(st.name || st.sym.yahoo || st.sym.alpha || st.sym.twelve || 'Noch kein ETF gewählt') + (when ? ' · Stand ' + when : '') + '</div>';
 }
 
-function checks(a) {
+function checkRows(a) {
   const st = S.settings;
   const rows = [
     [a.trendUp, 'Trend steigt', 'Die 30-Wochen-Linie zeigt nach oben.'],
-    [a.pulled, 'Rücksetzer', 'Der Kurs liegt mind. ' + num(st.pullback, 1) + ' % unter dem 10-Tage-Hoch (jetzt ' + num(a.pull, 1) + ' %).'],
+    [a.pulled, 'Rücksetzer', 'Mind. ' + num(st.pullback, 1) + ' % unter dem 10-Tage-Hoch (jetzt ' + num(a.pull, 1) + ' %).'],
     [a.near, 'Nahe an der 20-Tage-Linie', 'Abstand ' + num(a.dist, 1) + ' % (erlaubt: −' + num(st.tolDown, 1) + ' % bis +' + num(st.tolUp, 1) + ' %).']
   ];
-  return '<div class="sec">Kaufsignal</div><div class="group">' +
-    rows.map(r => '<div class="row"><span class="l"><i class="chk ' + (r[0] ? 'ok' : 'no') + '">' + (r[0] ? '✓' : '–') + '</i><span>' + r[1] + '<small>' + r[2] + '</small></span></span></div>').join('') +
-    '</div><div class="foot">Alle drei Punkte müssen erfüllt sein, damit die Anzeige auf „Jetzt kaufen“ springt.</div>';
+  return rows.map(r => '<div class="crow"><i class="chk ' + (r[0] ? 'ok' : 'no') + '">' + (r[0] ? '✓' : '–') + '</i><span>' + r[1] + '<small>' + r[2] + '</small></span></div>').join('');
 }
 
 function limitCard() {
@@ -650,7 +671,7 @@ function todayView() {
   const half = st.budget / 2;
   const winText = win.start.getDate() + '.–' + win.end.getDate() + '. ' + monShort(win.end);
   let h = title('Heute') + banner();
-  h += '<div class="hero' + (a ? ' compact' : '') + '"><div class="badge ' + s.color + '">' + s.icon + '</div><div><b>' + esc(s.title) + '</b><span>' + esc(s.text) + '</span></div></div>';
+  if (!a) h += '<div class="hero"><div class="badge ' + s.color + '">' + s.icon + '</div><b>' + esc(s.title) + '</b><span>' + esc(s.text) + '</span></div>';
   if (S.cache.error) {
     h += '<div class="alert"><b>' + (anyLimitToday() ? 'Limit erreicht' : 'Abruf fehlgeschlagen') + '</b>' + esc(S.cache.error).replace(/\n/g, '<br>') +
       (S.cache.detail ? '<small>Meldung des Anbieters: ' + esc(S.cache.detail) + '</small>' : '') + '</div>';
@@ -660,7 +681,6 @@ function todayView() {
     '<div class="row"><span class="k">Zeitraum</span><span class="v strong">' + winText + '</span></div>' +
     '<div class="row"><span class="k">Noch</span><span class="v strong">' + (days > 0 ? days + (days === 1 ? ' Tag' : ' Tage') : 'Heute letzter Tag') + '</span></div>' +
     '<div class="row"><span class="k">Betrag</span><span class="v strong">' + num(half, 0) + ' €</span></div></div>';
-  if (a) h += checks(a);
   if (bought) {
     h += '<div class="sec">Kauf</div><div class="group"><div class="row"><span class="k">Gekauft am ' + esc(bought.date) + '</span><span class="v strong">' + num(bought.price) + '</span></div></div>';
   } else if (a) {
@@ -755,6 +775,7 @@ document.addEventListener('click', async e => {
   const a = t.dataset.a;
   if (!['search', 'refresh', 'range', 'theme', 'prov'].includes(a)) msg = '';
   if (a === 'tab') { view = t.dataset.v; window.scrollTo(0, 0); render(); }
+  else if (a === 'info') { infoOpen = !infoOpen; render(); }
   else if (a === 'range') { range = Number(t.dataset.n); render(); }
   else if (a === 'theme') { S.settings.theme = t.dataset.v; save(); applyTheme(); render(); }
   else if (a === 'prov') { S.settings.provider = t.dataset.v; save(); render(); }
