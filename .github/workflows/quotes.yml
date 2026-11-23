@@ -2,8 +2,8 @@ name: Kurse aktualisieren
 
 on:
   schedule:
-    # Alle 30 Minuten, Mo-Fr, 07:00-21:59 UTC (deckt die Xetra-Handelszeit ab)
-    - cron: '*/30 7-21 * * 1-5'
+    # Mo-Fr fünfmal täglich (UTC). Hält die Abrufe unter dem Gratis-Limit von Alpha Vantage (2 Anfragen pro Lauf).
+    - cron: '5 7,10,13,16,19 * * 1-5'
   workflow_dispatch:
   push:
     paths:
