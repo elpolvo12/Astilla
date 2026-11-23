@@ -587,7 +587,7 @@ function chart(a) {
     grid +
     '<g clip-path="url(#cp)">' +
     '<path d="' + area + '" fill="url(#ga)"/>' +
-    '<path d="' + line(wl) + '" fill="none" stroke="#ff453a" stroke-width="1.8" stroke-dasharray="5 4" stroke-linejoin="round"/>' +
+    '<path d="' + line(wl) + '" fill="none" stroke="#ff453a" stroke-width="3.2" stroke-dasharray="0.1 7" stroke-linecap="round" stroke-linejoin="round"/>' +
     '<path d="' + line(s20) + '" fill="none" stroke="#ff9f0a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
     '<path d="' + pricePath + '" fill="none" stroke="#0a84ff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>' +
     '</g>' +
@@ -613,7 +613,7 @@ function chartCard(a) {
   const panel = infoOpen ? '<div class="infopanel"><b>' + esc(s.title) + '</b><p>' + esc(s.text) + '</p>' + checkRows(a) +
     '<div class="note">Alle drei Punkte müssen erfüllt sein, damit der Status auf „Kaufen“ springt.<br>' +
     '<span style="color:#ff9f0a">●</span> 20-Tage-Linie: Durchschnitt der letzten 20 Handelstage.<br>' +
-    '<span style="color:#ff453a">●</span> 30-Wochen-Linie (gestrichelt): langfristiger Trend' + (wInRange ? '' : ', liegt außerhalb des Ausschnitts') + '.</div></div>' : '';
+    '<span style="color:#ff453a">●</span> 30-Wochen-Linie (gepunktet): langfristiger Trend' + (wInRange ? '' : ', liegt außerhalb des Ausschnitts') + '.</div></div>' : '';
   const legend = '<div class="legend"><span><i class="dot" style="margin:0;background:#ff9f0a;color:#ff9f0a"></i>20 Tage <b>' + num(a.s20) + '</b></span>' +
     '<span><i class="dot" style="margin:0;background:#ff453a;color:#ff453a"></i>30 Wochen <b>' + num(a.w30now) + '</b></span></div>';
   return '<div class="sec">Kursverlauf</div>' +
