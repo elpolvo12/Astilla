@@ -126,6 +126,9 @@ button.link.del{color:var(--red)}
 .alert,.ok-msg{border-radius:20px;padding:13px 16px;font-size:14px;margin:14px 0 0;line-height:1.4}
 .alert{color:var(--red);background:color-mix(in srgb,var(--red) 16%,var(--glass))}
 .alert b{display:block;margin-bottom:3px}
+.errc{cursor:pointer;padding:10px 14px;font-size:13px}
+.errc b{display:flex;justify-content:space-between;align-items:center;font-size:14px}
+.errc b em{font-style:normal;font-weight:600;opacity:.75;font-size:12.5px}
 .alert small{display:block;opacity:.8;margin-top:6px;font-size:12px}
 .ok-msg{color:var(--green);background:color-mix(in srgb,var(--green) 16%,var(--glass))}
 .empty{text-align:center;color:var(--label2);padding:40px 16px}
@@ -193,6 +196,7 @@ html{overscroll-behavior-y:contain}
 <body>
 <div id="app"></div>
 <script>
+const APP_VERSION = '20261123160854';
 const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25, YAHOO_TTL = 15 * 60000;
 const pad = n => String(n).padStart(2, '0');
 const ds = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -249,7 +253,7 @@ function load() {
 function save() { localStorage.setItem(KEY, JSON.stringify(S)); }
 
 let S = load();
-let infoOpen = false, view = 'heute', busy = false, msg = '', msgType = 'ok', results = [], range = 60;
+let errOpen = false, infoOpen = false, view = 'heute', busy = false, msg = '', msgType = 'ok', results = [], range = 60;
 
 function applyTheme() {
   const t = S.settings.theme, el = document.documentElement;
@@ -673,8 +677,10 @@ function todayView() {
   let h = title('Heute') + banner();
   if (!a) h += '<div class="hero"><div class="badge ' + s.color + '">' + s.icon + '</div><b>' + esc(s.title) + '</b><span>' + esc(s.text) + '</span></div>';
   if (S.cache.error) {
-    h += '<div class="alert"><b>' + (anyLimitToday() ? 'Limit erreicht' : 'Abruf fehlgeschlagen') + '</b>' + esc(S.cache.error).replace(/\n/g, '<br>') +
-      (S.cache.detail ? '<small>Meldung des Anbieters: ' + esc(S.cache.detail) + '</small>' : '') + '</div>';
+    const lim = anyLimitToday();
+    const sum = (lim ? 'Limit erreicht' : 'Kurse konnten nicht geladen werden') + (S.cache.daily.length ? ', letzter Stand wird angezeigt' : '') + '.';
+    h += '<div class="alert errc" data-a="err"><b>' + (lim ? 'Limit erreicht' : 'Abruf fehlgeschlagen') + '<em>' + (errOpen ? '▾' : 'Details ›') + '</em></b>' +
+      (errOpen ? esc(S.cache.error).replace(/\n/g, '<br>') + (S.cache.detail ? '<small>Meldung des Anbieters: ' + esc(S.cache.detail) + '</small>' : '') : esc(sum)) + '</div>';
   }
   if (a) h += chartCard(a);
   h += '<div class="sec">Aktuelles Fenster</div><div class="group">' +
@@ -775,6 +781,7 @@ document.addEventListener('click', async e => {
   const a = t.dataset.a;
   if (!['search', 'refresh', 'range', 'theme', 'prov'].includes(a)) msg = '';
   if (a === 'tab') { view = t.dataset.v; window.scrollTo(0, 0); render(); }
+  else if (a === 'err') { errOpen = !errOpen; render(); }
   else if (a === 'info') { infoOpen = !infoOpen; render(); }
   else if (a === 'range') { range = Number(t.dataset.n); render(); }
   else if (a === 'theme') { S.settings.theme = t.dataset.v; save(); applyTheme(); render(); }
@@ -797,7 +804,22 @@ document.addEventListener('click', async e => {
 
 /* Live-Aktualisierung: alle 5 Minuten prüfen, geladen wird nur, wenn die Daten älter als 15 Minuten sind */
 setInterval(() => { if (!document.hidden && view === 'heute' && !busy) refresh(false); }, 5 * 60000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && view === 'heute' && !busy) refresh(false); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); if (!document.hidden && view === 'heute' && !busy) refresh(false); });
+
+/* Neue App-Version erkennen (iOS speichert Web-Apps stark zwischen) und einmal neu laden */
+async function checkUpdate() {
+  try {
+    const r = await fetch('index.html?cb=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const m = (await r.text()).match(/APP_VERSION\s*=\s*'(\d+)'/);
+    if (!m || m[1] === APP_VERSION) return;
+    let tried = ''; try { tried = sessionStorage.getItem('astilla.upd') || ''; } catch (e) {}
+    if (tried === m[1]) return;
+    try { sessionStorage.setItem('astilla.upd', m[1]); } catch (e) {}
+    toast('Neue Version, lade neu …', 'busy');
+    setTimeout(() => location.replace(location.pathname + '?v=' + m[1]), 700);
+  } catch (e) {}
+}
 
 /* Runterziehen: Seite neu laden und die Kurse frisch holen */
 (function () {
@@ -841,6 +863,7 @@ applyTheme();
 if (!order().length) view = 'einstellungen';
 render();
 refresh(false);
+checkUpdate();
 </script>
 </body>
 </html>
