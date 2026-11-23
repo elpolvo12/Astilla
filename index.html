@@ -170,18 +170,19 @@ const monShort = d => d.toLocaleDateString('de-DE', { month: 'short' });
 const stamp = ms => new Date(ms).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 const PROV = {
+  repo:   { name: 'Kursdatei (GitHub)', needsKey: false },
   yahoo:  { name: 'Yahoo Finance', needsKey: false },
   twelve: { name: 'Twelve Data',   needsKey: true },
   alpha:  { name: 'Alpha Vantage', needsKey: true }
 };
-const ORDER = ['yahoo', 'twelve', 'alpha'];
+const ORDER = ['repo', 'yahoo', 'twelve', 'alpha'];
 const sigOf = sym => [sym.yahoo, sym.twelve, sym.alpha].join('|');
 
 function defaults() {
   return {
     settings: { provider: 'auto', keys: { twelve: '', alpha: '' }, sym: { yahoo: '', twelve: '', alpha: '' }, name: '',
                 budget: 1000, tolUp: 1, tolDown: 3, pullback: 1, theme: 'dark' },
-    cache: { fetched: '', at: 0, source: '', via: '', sig: '', daily: [], weekly: [], error: '', detail: '', limits: {}, liveTime: 0, currency: '' },
+    cache: { fetched: '', at: 0, checkedAt: 0, source: '', via: '', sig: '', daily: [], weekly: [], error: '', detail: '', limits: {}, liveTime: 0, currency: '' },
     usage: { date: '', n: 0 },
     log: []
   };
@@ -368,6 +369,16 @@ async function fromTwelve(sym, key) {
   return { daily, weekly, via: '', liveTime: 0, currency: '' };
 }
 
+/* Kursdatei: eine GitHub-Automatik holt die Kurse bei Yahoo und legt sie als quotes.json neben die App. */
+async function fromRepo(sym) {
+  const r = await fetch('quotes.json?t=' + Date.now(), { cache: 'no-store' });
+  if (!r.ok) throw new Error('Kursdatei noch nicht vorhanden (HTTP ' + r.status + ')');
+  const j = await r.json();
+  const q = j.symbols && j.symbols[sym];
+  if (!q) throw new Error('Symbol ' + sym + ' steht nicht in der Kursdatei');
+  return { daily: q.daily, weekly: q.weekly, via: '', liveTime: q.liveTime || 0, currency: q.currency || '', dataAt: j.updated ? Date.parse(j.updated) : 0 };
+}
+
 /* Alpha Vantage */
 async function av(fn, sym, key, extra) {
   const url = 'https://www.alphavantage.co/query?function=' + fn + '&symbol=' + enc(sym) + (extra || '') + '&apikey=' + enc(key);
@@ -387,6 +398,7 @@ async function fromAlpha(sym, key) {
 
 function available(p) {
   const st = S.settings;
+  if (p === 'repo') return !!st.sym.yahoo;
   return !!st.sym[p] && (!PROV[p].needsKey || !!st.keys[p]);
 }
 function order() {
@@ -395,6 +407,7 @@ function order() {
 }
 function fetchSource(p) {
   const st = S.settings;
+  if (p === 'repo') return fromRepo(st.sym.yahoo);
   if (p === 'yahoo') return fromYahoo(st.sym.yahoo);
   if (p === 'twelve') return fromTwelve(st.sym.twelve, st.keys.twelve);
   return fromAlpha(st.sym.alpha, st.keys.alpha);
@@ -407,7 +420,7 @@ async function refresh(force) {
   if (!list.length) { c.error = 'Bitte in den Einstellungen eine Datenquelle einrichten.'; c.detail = ''; render(); return; }
   const same = c.sig === sig && c.daily.length;
   if (!force && same) {
-    const fresh = c.source === 'yahoo' ? Date.now() - c.at < YAHOO_TTL : c.fetched === ds(today());
+    const fresh = (c.source === 'yahoo' || c.source === 'repo') ? Date.now() - (c.checkedAt || c.at) < YAHOO_TTL : c.fetched === ds(today());
     if (fresh) { render(); return; }
   }
   if (busy) return;
@@ -420,7 +433,7 @@ async function refresh(force) {
       const r = await fetchSource(p);
       if (r.daily.length < 2) throw new Error('Zu wenige Kursdaten');
       const limits = Object.assign({}, c.limits); limits[p] = '';
-      S.cache = { fetched: ds(today()), at: Date.now(), source: p, via: r.via || '', sig, daily: r.daily, weekly: r.weekly,
+      S.cache = { fetched: ds(today()), at: r.dataAt || Date.now(), checkedAt: Date.now(), source: p, via: r.via || '', sig, daily: r.daily, weekly: r.weekly,
                   error: '', detail: '', limits, liveTime: r.liveTime || 0, currency: r.currency || '' };
       busy = false; save(); render();
       if (force) toast(toastPrefix + 'Kurse geladen (' + PROV[p].name + (r.via ? ', Proxy' : '') + ')', 'ok');
@@ -601,11 +614,11 @@ function limitCard() {
       rows += '<div class="row"><span class="k">' + PROV[p].name + '</span><span class="v strong" style="color:var(--red)">Limit erreicht</span></div>';
   });
   return '<div class="sec">Datenquelle und Limit</div><div class="group">' + rows + '</div>' +
-    '<div class="foot"><b>Yahoo Finance</b> braucht keinen Schlüssel und hat kein festes Tageslimit. Die Schnittstelle ist inoffiziell, Kurse können leicht verzögert sein. ' +
+    '<div class="foot"><b>Kursdatei (GitHub)</b> ist der zuverlässigste Weg: Eine Automatik im Repo holt die Kurse werktags etwa alle 30 Minuten bei Yahoo und legt sie neben die App. Kein Schlüssel, kein Proxy, kein Limit. Sie nutzt das Yahoo-Symbol aus den Einstellungen, das auch in <code>symbols.json</code> im Repo stehen muss.<br><br><b>Yahoo Finance</b> direkt braucht keinen Schlüssel und hat kein festes Tageslimit. Die Schnittstelle ist inoffiziell, Kurse können leicht verzögert sein. ' +
     'Solange die App offen ist, wird alle 15 Minuten aktualisiert. Blockiert der Browser die Direktabfrage, läuft sie über einen öffentlichen Proxy, dabei wird nur das ETF-Symbol übertragen.<br><br>' +
     '<b>Alpha Vantage</b> (gratis): etwa 25 Anfragen pro Tag und 5 pro Minute. Eine Aktualisierung braucht 2 Anfragen, eine Suche 1. Nach einem Limit-Fehler fragt die App am selben Tag nicht mehr von selbst an. ' +
     '<b>Twelve Data</b> (gratis): 8 pro Minute und 800 pro Tag, aber nicht jede Börse.<br><br>' +
-    'Im Modus „Automatisch“ nimmt die App die Quellen der Reihe nach (Yahoo, Twelve Data, Alpha Vantage) und nutzt die erste, die Daten liefert.</div>';
+    'Im Modus „Automatisch“ nimmt die App die Quellen der Reihe nach (Kursdatei, Yahoo, Twelve Data, Alpha Vantage) und nutzt die erste, die Daten liefert.</div>';
 }
 
 function todayView() {
@@ -671,8 +684,8 @@ function settingsView() {
     '<button class="' + (cur === x[0] ? 'on' : '') + '" data-a="' + act + '" data-v="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
   return title('Einstellungen') + banner() +
     '<div class="sec">Darstellung</div><div class="group">' + seg([['auto', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']], st.theme, 'theme') + '</div>' +
-    '<div class="sec">Datenquelle</div><div class="group">' + seg([['auto', 'Auto'], ['yahoo', 'Yahoo'], ['twelve', 'Twelve'], ['alpha', 'Alpha']], st.provider, 'prov') + '</div>' +
-    '<div class="foot">Auto probiert die Quellen der Reihe nach und nimmt die erste, die klappt. Jede Quelle braucht ihr eigenes Symbol, weil dasselbe Wertpapier je nach Anbieter anders heißt.</div>' +
+    '<div class="sec">Datenquelle</div><div class="group">' + seg([['auto', 'Auto'], ['repo', 'Datei'], ['yahoo', 'Yahoo'], ['twelve', 'Twelve'], ['alpha', 'Alpha']], st.provider, 'prov') + '</div>' +
+    '<div class="foot">Auto probiert die Quellen der Reihe nach und nimmt die erste, die klappt. „Datei“ und „Yahoo“ nutzen dasselbe Yahoo-Symbol, die anderen Quellen brauchen ihr eigenes.</div>' +
 
     '<div class="sec">Yahoo Finance · ohne Schlüssel</div><div class="group">' +
     '<div class="field"><label for="ysym">Symbol</label><input id="ysym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYI.DE" value="' + esc(st.sym.yahoo) + '"></div>' +
