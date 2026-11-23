@@ -196,7 +196,7 @@ html{overscroll-behavior-y:contain}
 <body>
 <div id="app"></div>
 <script>
-const APP_VERSION = '20261123230100';
+const APP_VERSION = '20261123232459';
 const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25, YAHOO_TTL = 15 * 60000;
 const pad = n => String(n).padStart(2, '0');
 const ds = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -314,13 +314,33 @@ function analyze() {
   return { close, s20, s50, w30, w30now, trendUp, dist, pull, near, pulled, green };
 }
 
+function prevBusinessDay(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1);
+  while (x.getDay() === 0 || x.getDay() === 6) x.setDate(x.getDate() - 1);
+  return x;
+}
+/* Daten sind alt, wenn der letzte Kurs älter ist als der letzte Handelstag vor heute */
+function staleData() {
+  const D = S.cache.daily;
+  return D.length > 0 && D[D.length - 1].d < ds(prevBusinessDay(today()));
+}
+function lastDataDate() {
+  const D = S.cache.daily;
+  return D.length ? parseD(D[D.length - 1].d).toLocaleDateString('de-DE') : '';
+}
+
 function status(a) {
   const t = today(), win = windowOf(t);
   const bought = S.log.find(e => e.window === win.key);
   const lastDay = ds(t) === ds(win.end);
   if (bought) return { short: 'Erledigt', color: 'blue', icon: '✓', title: 'Erledigt', text: 'In diesem Zeitfenster hast du schon gekauft.' };
   if (busy && !a) return { short: 'Lädt …', color: 'blue', icon: '…', title: 'Lädt Kurse …', text: 'Einen Moment bitte.' };
+  /* Zwangskauf-Hinweis hängt nur vom Datum ab und kommt auch ohne oder mit alten Kursdaten */
+  if (lastDay && (!a || staleData()))
+    return { short: 'Heute kaufen', color: 'orange', icon: '!', title: 'Letzter Tag',
+             text: 'Heute endet das Zeitfenster. Kaufe heute, auch ohne Signal. ' + (a ? 'Die Kursdaten sind alt (vom ' + lastDataDate() + ').' : 'Kursdaten fehlen gerade.') };
   if (!a) return { short: 'Keine Daten', color: 'gray', icon: '…', title: 'Keine Daten', text: 'Kursdaten fehlen noch. Prüfe unten die Datenquelle.' };
+  if (staleData()) return { short: 'Daten alt', color: 'gray', icon: '!', title: 'Daten sind alt', text: 'Der letzte Kurs ist vom ' + lastDataDate() + '. Ziehe die Seite nach unten zum Aktualisieren, bevor du entscheidest.' };
   if (a.green) return { short: 'Kaufen', color: 'green', icon: '✓', title: 'Jetzt kaufen', text: 'Der Trend steigt und der Kurs hat nach einem Rücksetzer die 20-Tage-Linie erreicht.' };
   if (lastDay) return { short: 'Heute kaufen', color: 'orange', icon: '!', title: 'Letzter Tag', text: 'Heute endet das Zeitfenster. Kaufe heute, auch ohne Signal.' };
   if (!a.trendUp) return { short: 'Trend fällt', color: 'red', icon: '↓', title: 'Trend fällt', text: 'Die 30-Wochen-Linie fällt. Warte, bis das Fenster endet.' };
@@ -660,7 +680,7 @@ function banner() {
 function title(t) {
   const st = S.settings, c = S.cache;
   const when = c.at ? stamp(c.at) : c.fetched ? parseD(c.fetched).toLocaleDateString('de-DE') : '';
-  return '<h1>' + esc(t) + '</h1><div class="sub">' + esc(st.name || st.sym.yahoo || st.sym.alpha || st.sym.twelve || 'Noch kein ETF gewählt') + (when ? ' · Stand ' + when : '') + '</div>';
+  return '<h1>' + esc(t) + '</h1><div class="sub">' + esc(st.name || st.sym.yahoo || st.sym.alpha || st.sym.twelve || 'Noch kein ETF gewählt') + (when ? ' · Stand ' + when : '') + (staleData() ? ' <span style="color:var(--orange);font-weight:600">· Daten alt</span>' : '') + '</div>';
 }
 
 function checkRows(a) {
