@@ -1,24 +1,29 @@
-// Holt Kurse bei Yahoo Finance und schreibt sie nach quotes.json.
-// Läuft per GitHub-Automatik (kein Browser, daher keine CORS-Sperre).
+// Holt Kurse und schreibt sie nach quotes.json. Läuft per GitHub-Automatik (kein Browser, keine CORS-Sperre).
+// Quellen der Reihe nach: Yahoo Finance, Stooq, optional Alpha Vantage (Secret ALPHA_KEY).
 import fs from 'node:fs';
 
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const pad = n => String(n).padStart(2, '0');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const clip = s => String(s).replace(/\s+/g, ' ').slice(0, 100);
 
-async function getJSON(path) {
+/* ---------- Yahoo ---------- */
+async function yahooJSON(path) {
   let last;
-  for (const host of ['query1', 'query2']) {
-    try {
-      const r = await fetch('https://' + host + '.finance.yahoo.com' + path, { headers: { 'User-Agent': UA, Accept: 'application/json' } });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return await r.json();
-    } catch (e) { last = e; }
+  for (let round = 0; round < 2; round++) {
+    for (const host of ['query1', 'query2']) {
+      try {
+        const r = await fetch('https://' + host + '.finance.yahoo.com' + path, { headers: { 'User-Agent': UA, Accept: 'application/json' } });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return await r.json();
+      } catch (e) { last = e; }
+    }
+    await sleep(3000);
   }
   throw last;
 }
-
-async function series(sym, range, interval) {
-  const j = await getJSON('/v8/finance/chart/' + encodeURIComponent(sym) + '?range=' + range + '&interval=' + interval + '&includePrePost=false');
+async function yahooSeries(sym, range, interval) {
+  const j = await yahooJSON('/v8/finance/chart/' + encodeURIComponent(sym) + '?range=' + range + '&interval=' + interval + '&includePrePost=false');
   const res = j && j.chart && j.chart.result && j.chart.result[0];
   if (!res) throw new Error((j && j.chart && j.chart.error && j.chart.error.description) || 'Symbol unbekannt');
   const off = (res.meta && res.meta.gmtoffset) || 0, ts = res.timestamp || [];
@@ -32,51 +37,81 @@ async function series(sym, range, interval) {
   });
   return { list: [...m].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([d, c]) => ({ d, c })), meta: res.meta || {} };
 }
-
-async function fromSymbol(sym) {
-  const d = await series(sym, '1y', '1d');
-  const w = await series(sym, '2y', '1wk');
-  if (d.list.length < 50 || w.list.length < 31) throw new Error('Zu wenige Kursdaten');
-  return {
-    name: d.meta.longName || d.meta.shortName || sym,
-    currency: d.meta.currency || '',
-    liveTime: (d.meta.regularMarketTime || 0) * 1000,
-    daily: d.list,
-    weekly: w.list
+async function fromYahoo(want) {
+  let sym = want.symbol;
+  const go = async s => {
+    const d = await yahooSeries(s, '1y', '1d'), w = await yahooSeries(s, '2y', '1wk');
+    return { name: d.meta.longName || d.meta.shortName || s, currency: d.meta.currency || '', liveTime: (d.meta.regularMarketTime || 0) * 1000, daily: d.list, weekly: w.list };
   };
+  try { return await go(sym); }
+  catch (e) {
+    if (!want.isin || /429/.test(e.message)) throw e;
+    const j = await yahooJSON('/v1/finance/search?q=' + encodeURIComponent(want.isin) + '&quotesCount=8&newsCount=0');
+    const q = (j.quotes || []).filter(x => x.symbol);
+    const alt = (q.find(x => /\.DE$/.test(x.symbol)) || q[0] || {}).symbol;
+    if (!alt || alt === sym) throw e;
+    console.log('  Alternative per ISIN: ' + alt);
+    return await go(alt);
+  }
 }
 
-async function findByIsin(isin) {
-  const j = await getJSON('/v1/finance/search?q=' + encodeURIComponent(isin) + '&quotesCount=8&newsCount=0');
-  const q = (j.quotes || []).filter(x => x.symbol);
-  const pick = q.find(x => /\.DE$/.test(x.symbol)) || q[0];
-  return pick && pick.symbol;
+/* ---------- Stooq (CSV, ohne Schlüssel) ---------- */
+async function stooqSeries(sym, i) {
+  const r = await fetch('https://stooq.com/q/d/l/?s=' + encodeURIComponent(sym.toLowerCase()) + '&i=' + i, { headers: { 'User-Agent': UA } });
+  const t = await r.text();
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  if (!t.startsWith('Date,')) throw new Error('Unerwartete Antwort: ' + clip(t));
+  return t.trim().split('\n').slice(1).map(l => { const c = l.split(','); return { d: c[0], c: parseFloat(c[4]) }; }).filter(x => x.d && isFinite(x.c));
+}
+async function fromStooq(want) {
+  const sym = want.stooq || want.symbol;
+  const daily = (await stooqSeries(sym, 'd')).slice(-260);
+  const weekly = (await stooqSeries(sym, 'w')).slice(-110);
+  return { name: want.symbol, currency: want.currency || '', liveTime: 0, daily, weekly };
 }
 
+/* ---------- Alpha Vantage (nur mit Secret ALPHA_KEY) ---------- */
+async function alphaSeries(sym, fn, extra) {
+  const r = await fetch('https://www.alphavantage.co/query?function=' + fn + '&symbol=' + encodeURIComponent(sym) + (extra || '') + '&apikey=' + encodeURIComponent(process.env.ALPHA_KEY));
+  const j = await r.json();
+  if (j.Note || j.Information) throw new Error('Limit: ' + clip(j.Note || j.Information));
+  const s = j['Time Series (Daily)'] || j['Weekly Time Series'];
+  if (!s) throw new Error('Keine Daten: ' + clip(JSON.stringify(j)));
+  return Object.keys(s).sort().map(d => ({ d, c: parseFloat(s[d]['4. close']) })).filter(x => isFinite(x.c));
+}
+async function fromAlpha(want) {
+  if (!process.env.ALPHA_KEY) throw new Error('kein Secret ALPHA_KEY');
+  const sym = want.alpha || want.symbol;
+  const daily = await alphaSeries(sym, 'TIME_SERIES_DAILY', '&outputsize=compact');
+  const weekly = await alphaSeries(sym, 'TIME_SERIES_WEEKLY');
+  return { name: want.symbol, currency: want.currency || '', liveTime: 0, daily, weekly };
+}
+
+/* ---------- Ablauf ---------- */
 const cfg = JSON.parse(fs.readFileSync('symbols.json', 'utf8'));
 let out = { updated: '', symbols: {} };
 try { out = JSON.parse(fs.readFileSync('quotes.json', 'utf8')); } catch (e) {}
 out.symbols = out.symbols || {};
 
+const SOURCES = [['Yahoo', fromYahoo], ['Stooq', fromStooq], ['Alpha Vantage', fromAlpha]];
 let ok = 0;
 for (const item of cfg) {
   const want = typeof item === 'string' ? { symbol: item } : item;
-  let sym = want.symbol, data = null;
-  try { data = await fromSymbol(sym); }
-  catch (e) {
-    console.log(sym + ': ' + e.message);
-    if (want.isin) {
-      try { const alt = await findByIsin(want.isin); if (alt && alt !== sym) { console.log('Alternative per ISIN: ' + alt); sym = alt; data = await fromSymbol(alt); } }
-      catch (e2) { console.log('ISIN-Suche: ' + e2.message); }
-    }
+  let data = null;
+  for (const [name, fn] of SOURCES) {
+    try {
+      const d = await fn(want);
+      if (d.daily.length < 50 || d.weekly.length < 31) throw new Error('Zu wenige Kursdaten (' + d.daily.length + ' Tage, ' + d.weekly.length + ' Wochen)');
+      data = Object.assign(d, { source: name });
+      console.log(want.symbol + ': ' + name + ' ok, ' + d.daily.length + ' Tage, ' + d.weekly.length + ' Wochen, letzter Kurs ' + d.daily[d.daily.length - 1].c + ' (' + d.daily[d.daily.length - 1].d + ')');
+      break;
+    } catch (e) { console.log(want.symbol + ': ' + name + ' fehlgeschlagen: ' + e.message); }
   }
-  if (data) {
-    out.symbols[want.symbol] = data;      // unter dem konfigurierten Namen speichern
-    if (sym !== want.symbol) out.symbols[sym] = data;
-    ok++;
-    console.log(want.symbol + ': ' + data.daily.length + ' Tage, ' + data.weekly.length + ' Wochen, Kurs ' + data.daily[data.daily.length - 1].c);
-  }
+  if (data) { out.symbols[want.symbol] = data; ok++; }
 }
-if (!ok) { console.error('Kein Symbol konnte geladen werden.'); process.exit(1); }
+if (!ok) {
+  console.log('::warning::Keine Quelle lieferte Kurse. quotes.json bleibt unverändert.');
+  process.exit(0);
+}
 out.updated = new Date().toISOString();
 fs.writeFileSync('quotes.json', JSON.stringify(out));
