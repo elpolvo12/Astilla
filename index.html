@@ -140,6 +140,16 @@ button.link.del{color:var(--red)}
   display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 0 6px;border-radius:999px;cursor:pointer}
 .tabbar button.on{color:var(--blue);background:var(--glass-strong);box-shadow:inset 0 1px 0 var(--glass-hi),0 2px 10px rgba(0,0,0,.14)}
 .tabbar svg{width:24px;height:24px;margin:0;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+/* kompakter Status, wenn Daten da sind */
+.hero.compact{display:flex;align-items:center;gap:16px;text-align:left;padding:16px 18px;margin-top:10px}
+.hero.compact .badge{width:58px;height:58px;font-size:30px;margin:0;flex:none}
+.hero.compact b{font-size:22px}
+.hero.compact span{font-size:14px;margin-top:3px}
+.pricehead{position:relative;z-index:1;padding:16px 18px 0}
+.pricehead .big{font-size:38px;font-weight:700;letter-spacing:.2px;line-height:1.1}
+.pricehead .big small{font-size:17px;font-weight:600;color:var(--label2);margin-left:6px}
+.pricehead .chg{font-size:15px;font-weight:600;margin-top:2px}
+.pricehead .chg.up{color:var(--green)}.pricehead .chg.down{color:var(--red)}.pricehead .chg span{color:var(--label2);font-weight:500}
 /* ---------- Meldung oben (Toast) ---------- */
 .toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 10px);transform:translate(-50%,-140%);z-index:20;width:max-content;max-width:calc(100vw - 32px);
   display:flex;align-items:center;gap:10px;padding:11px 18px;border-radius:26px;font-size:15px;font-weight:600;line-height:1.25;color:var(--label);
@@ -516,7 +526,7 @@ function chart(a) {
   const padv = (mx - mn) * 0.08 || 1;
   mn -= padv; mx += padv;
   const sp = mx - mn;
-  const Wd = 360, H = 210, x0 = 6, x1 = 312, y0 = 10, y1 = 184;
+  const Wd = 360, H = 262, x0 = 6, x1 = 312, y0 = 10, y1 = 236;
   const X = k => x0 + k / (d.length - 1) * (x1 - x0);
   const Y = v => y1 - (v - mn) / sp * (y1 - y0);
   const dec = sp < 5 ? 2 : sp < 30 ? 1 : 0;
@@ -568,8 +578,11 @@ function chartCard(a) {
   })();
   const seg = [[30, '1 Monat'], [60, '3 Monate'], [100, 'Alles']]
     .map(r => '<button class="' + (range === r[0] ? 'on' : '') + '" data-a="range" data-n="' + r[0] + '">' + r[1] + '</button>').join('');
+  const L = D.length - 1, prev = D[L - 1] ? D[L - 1].c : a.close, chg = (a.close / prev - 1) * 100;
+  const head = '<div class="pricehead"><div class="big">' + num(a.close) + (S.cache.currency ? '<small>' + esc(S.cache.currency) + '</small>' : '') + '</div>' +
+    '<div class="chg ' + (chg >= 0 ? 'up' : 'down') + '">' + (chg >= 0 ? '▲ ' : '▼ ') + num(Math.abs(chg)) + ' % <span>zum Vortag</span></div></div>';
   return '<div class="sec">Kursverlauf</div>' +
-    '<div class="group"><div class="seg">' + seg + '</div>' +
+    '<div class="group">' + head + '<div class="seg">' + seg + '</div>' +
     '<div class="chartbox">' + chart(a) + '</div>' +
     '<div class="row"><span class="l"><i class="dot" style="background:#0a84ff;color:#0a84ff"></i>Kurs</span><span class="v strong">' + num(a.close) + (S.cache.currency ? ' ' + esc(S.cache.currency) : '') + '</span></div>' +
     '<div class="row"><span class="l"><i class="dot" style="background:#ff9f0a;color:#ff9f0a"></i><span>20-Tage-Linie<small>Durchschnitt der letzten 20 Handelstage</small></span></span><span class="v strong">' + num(a.s20) + '</span></div>' +
@@ -628,11 +641,12 @@ function todayView() {
   const half = st.budget / 2;
   const winText = win.start.getDate() + '.–' + win.end.getDate() + '. ' + monShort(win.end);
   let h = title('Heute') + banner();
-  h += '<div class="hero"><div class="badge ' + s.color + '">' + s.icon + '</div><b>' + esc(s.title) + '</b><span>' + esc(s.text) + '</span></div>';
+  h += '<div class="hero' + (a ? ' compact' : '') + '"><div class="badge ' + s.color + '">' + s.icon + '</div><div><b>' + esc(s.title) + '</b><span>' + esc(s.text) + '</span></div></div>';
   if (S.cache.error) {
     h += '<div class="alert"><b>' + (anyLimitToday() ? 'Limit erreicht' : 'Abruf fehlgeschlagen') + '</b>' + esc(S.cache.error).replace(/\n/g, '<br>') +
       (S.cache.detail ? '<small>Meldung des Anbieters: ' + esc(S.cache.detail) + '</small>' : '') + '</div>';
   }
+  if (a) h += chartCard(a);
   h += '<div class="sec">Aktuelles Fenster</div><div class="group">' +
     '<div class="row"><span class="k">Zeitraum</span><span class="v strong">' + winText + '</span></div>' +
     '<div class="row"><span class="k">Noch</span><span class="v strong">' + (days > 0 ? days + (days === 1 ? ' Tag' : ' Tage') : 'Heute letzter Tag') + '</span></div>' +
@@ -647,7 +661,6 @@ function todayView() {
       '<button class="btn" data-a="buy">Kauf speichern</button>' +
       '<div class="foot">Der Kurs ist der zuletzt geladene Kurs. Passe ihn an, wenn du anders gekauft hast.</div>';
   }
-  if (a) h += chartCard(a);
   h += limitCard();
   h += '<button class="btn sec2" data-a="refresh">' + (busy ? 'Lädt …' : 'Kurse aktualisieren') + '</button>';
   return h;
