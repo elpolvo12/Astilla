@@ -269,18 +269,29 @@ function limitText(detail, p) {
   return 'Tageslimit erreicht.';
 }
 
-/* Direkt abfragen. Blockiert der Browser die Anfrage (CORS), optional über einen öffentlichen Proxy. */
+/* Direkt abfragen. Klappt das nicht (CORS, Sperre, Limit), nacheinander über öffentliche Proxys. */
+const PROXIES = [
+  u => 'https://api.allorigins.win/raw?url=' + enc(u),
+  u => 'https://corsproxy.io/?url=' + enc(u),
+  u => 'https://api.codetabs.com/v1/proxy?quest=' + enc(u)
+];
+const short = e => (e instanceof TypeError ? 'blockiert/offline' : String(e.message || e).slice(0, 60));
 async function fetchJSON(url, proxyOK) {
-  try {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return { j: await r.json(), via: '' };
-  } catch (e) {
-    if (!proxyOK || !(e instanceof TypeError)) throw e;
-    const r = await fetch('https://api.allorigins.win/raw?url=' + enc(url));
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return { j: await r.json(), via: 'Proxy' };
+  const tries = [['direkt', url, '']];
+  if (proxyOK) PROXIES.forEach((f, i) => tries.push(['Proxy ' + (i + 1), f(url), 'Proxy']));
+  const errs = [];
+  for (const [label, u, via] of tries) {
+    try {
+      const r = await fetch(u);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return { j: await r.json(), via };
+    } catch (e) {
+      /* Bei normalen API-Fehlern (z. B. 404) lohnt sich kein weiterer Weg nicht, bei Sperren schon */
+      errs.push(label + ': ' + short(e));
+      if (!proxyOK) throw e;
+    }
   }
+  const e = new Error(errs.join(', ')); e.multi = true; throw e;
 }
 
 function dedupe(list) {
@@ -291,8 +302,13 @@ function dedupe(list) {
 
 /* Yahoo Finance: ohne Schlüssel, aktueller Kurs steckt im letzten Tagesbalken */
 async function yahooSeries(sym, range, interval) {
-  const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + enc(sym) + '?range=' + range + '&interval=' + interval + '&includePrePost=false';
-  const { j, via } = await fetchJSON(url, true);
+  const path = '/v8/finance/chart/' + enc(sym) + '?range=' + range + '&interval=' + interval + '&includePrePost=false';
+  let j, via, lastErr;
+  for (const host of ['query1', 'query2']) {
+    try { ({ j, via } = await fetchJSON('https://' + host + '.finance.yahoo.com' + path, true)); lastErr = null; break; }
+    catch (e) { lastErr = e; }
+  }
+  if (lastErr) throw lastErr;
   const res = j && j.chart && j.chart.result && j.chart.result[0];
   if (!res) throw new Error((j && j.chart && j.chart.error && j.chart.error.description) || 'Symbol bei Yahoo unbekannt');
   const off = (res.meta && res.meta.gmtoffset) || 0, ts = res.timestamp || [];
