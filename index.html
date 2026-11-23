@@ -140,6 +140,17 @@ button.link.del{color:var(--red)}
   display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 0 6px;border-radius:999px;cursor:pointer}
 .tabbar button.on{color:var(--blue);background:var(--glass-strong);box-shadow:inset 0 1px 0 var(--glass-hi),0 2px 10px rgba(0,0,0,.14)}
 .tabbar svg{width:24px;height:24px;margin:0;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+/* ---------- Meldung oben (Toast) ---------- */
+.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 10px);transform:translate(-50%,-140%);z-index:20;width:max-content;max-width:calc(100vw - 32px);
+  display:flex;align-items:center;gap:10px;padding:11px 18px;border-radius:26px;font-size:15px;font-weight:600;line-height:1.25;color:var(--label);
+  background:var(--glass-strong);-webkit-backdrop-filter:blur(26px) saturate(180%);backdrop-filter:blur(26px) saturate(180%);
+  border:1px solid var(--glass-edge);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi);
+  transition:transform .35s cubic-bezier(.2,.9,.3,1.2);pointer-events:none}
+.toast.show{transform:translate(-50%,0)}
+.toast i{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:13px;color:#fff;flex:none}
+.toast.ok i{background:var(--green)}.toast.err i{background:var(--red)}
+.toast.busy i{background:transparent;border:3px solid var(--fill);border-top-color:var(--blue);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -207,6 +218,19 @@ function applyTheme() {
   if (t === 'light' || t === 'dark') el.setAttribute('data-theme', t); else el.removeAttribute('data-theme');
 }
 
+let toastTimer = 0, toastPrefix = '';
+function toast(text, kind, ms) {
+  let el = document.getElementById('toast');
+  if (!el) { el = document.createElement('div'); el.id = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+  clearTimeout(toastTimer);
+  el.className = 'toast ' + (kind || 'ok');
+  el.innerHTML = '<i>' + (kind === 'ok' ? '✓' : kind === 'err' ? '!' : '') + '</i><span>' + esc(text) + '</span>';
+  void el.offsetWidth;
+  el.classList.add('show');
+  if (kind !== 'busy') toastTimer = setTimeout(() => el.classList.remove('show'), ms || 3200);
+  if (navigator.vibrate) { try { navigator.vibrate(kind === 'err' ? [20, 40, 20] : 12); } catch (e) {} }
+}
+
 /* Anfragen-Zähler für Alpha Vantage (nur dieses Gerät) */
 function bump() {
   const t = ds(today());
@@ -253,6 +277,7 @@ function status(a) {
   const bought = S.log.find(e => e.window === win.key);
   const lastDay = ds(t) === ds(win.end);
   if (bought) return { color: 'blue', icon: '✓', title: 'Erledigt', text: 'In diesem Zeitfenster hast du schon gekauft.' };
+  if (busy && !a) return { color: 'blue', icon: '…', title: 'Lädt Kurse …', text: 'Einen Moment bitte.' };
   if (!a) return { color: 'gray', icon: '…', title: 'Keine Daten', text: 'Kursdaten fehlen noch. Prüfe unten die Datenquelle.' };
   if (a.green) return { color: 'green', icon: '✓', title: 'Jetzt kaufen', text: 'Der Trend steigt und der Kurs hat nach einem Rücksetzer die 20-Tage-Linie erreicht.' };
   if (lastDay) return { color: 'orange', icon: '!', title: 'Letzter Tag', text: 'Heute endet das Zeitfenster. Kaufe heute, auch ohne Signal.' };
@@ -272,7 +297,6 @@ function limitText(detail, p) {
 /* Direkt abfragen. Klappt das nicht (CORS, Sperre, Limit), nacheinander über öffentliche Proxys. */
 const PROXIES = [
   u => 'https://api.allorigins.win/raw?url=' + enc(u),
-  u => 'https://corsproxy.io/?url=' + enc(u),
   u => 'https://api.codetabs.com/v1/proxy?quest=' + enc(u)
 ];
 const short = e => (e instanceof TypeError ? 'blockiert/offline' : String(e.message || e).slice(0, 60));
@@ -388,6 +412,7 @@ async function refresh(force) {
   }
   if (busy) return;
   busy = true; render();
+  if (force) toast(toastPrefix + 'lade Kurse …', 'busy');
   const errs = []; let detail = '';
   for (const p of list) {
     if (!force && c.limits[p] === ds(today())) { errs.push(PROV[p].name + ': Limit heute erreicht'); continue; }
@@ -397,7 +422,9 @@ async function refresh(force) {
       const limits = Object.assign({}, c.limits); limits[p] = '';
       S.cache = { fetched: ds(today()), at: Date.now(), source: p, via: r.via || '', sig, daily: r.daily, weekly: r.weekly,
                   error: '', detail: '', limits, liveTime: r.liveTime || 0, currency: r.currency || '' };
-      busy = false; save(); render(); return;
+      busy = false; save(); render();
+      if (force) toast(toastPrefix + 'Kurse geladen (' + PROV[p].name + (r.via ? ', Proxy' : '') + ')', 'ok');
+      toastPrefix = ''; return;
     } catch (err) {
       if (err.limit) { c.limits[p] = ds(today()); detail = err.detail; errs.push(PROV[p].name + ': ' + limitText(err.detail, p)); }
       else errs.push(PROV[p].name + ': ' + (err instanceof TypeError ? 'Verbindung nicht möglich (offline oder blockiert)' : err.message));
@@ -407,6 +434,8 @@ async function refresh(force) {
   c.error = errs.join('\n') + (c.daily.length ? '\nAngezeigt wird der letzte gespeicherte Stand.' : '');
   c.detail = detail;
   busy = false; save(); render();
+  if (force) toast(toastPrefix + 'Abruf fehlgeschlagen, Details auf „Heute“', 'err', 5000);
+  toastPrefix = '';
 }
 
 async function search(src, q) {
@@ -436,7 +465,7 @@ function buy() {
   if (S.log.some(e => e.window === win.key)) { msg = 'Für dieses Fenster gibt es schon einen Kauf.'; msgType = 'err'; render(); return; }
   const first = S.cache.daily.find(x => { const d = parseD(x.d); return d >= win.start && d <= win.end; });
   S.log.push({ id: Date.now(), date: ds(t), window: win.key, price: p, amount: amt, shares: amt / p, firstPrice: first ? first.c : p });
-  save(); msg = 'Kauf gespeichert.'; msgType = 'ok'; render();
+  save(); msg = ''; render(); toast('Kauf gespeichert ✓', 'ok');
 }
 
 function saveSettings() {
@@ -451,7 +480,9 @@ function saveSettings() {
   st.tolUp = parseFloat(g('tu')) || 0;
   st.tolDown = parseFloat(g('td')) || 0;
   st.pullback = parseFloat(g('pb')) || 0;
-  view = 'heute'; msg = 'Gespeichert.'; msgType = 'ok'; save(); refresh(true);
+  view = 'heute'; msg = ''; save(); window.scrollTo(0, 0); toastPrefix = 'Gespeichert · ';
+  if (!order().length) { toast('Gespeichert · bitte noch ein Symbol eintragen', 'err', 4500); toastPrefix = ''; render(); return; }
+  refresh(true);
 }
 
 /* ---------- Grafik ---------- */
@@ -539,7 +570,7 @@ function banner() {
 function title(t) {
   const st = S.settings, c = S.cache;
   const when = c.at ? stamp(c.at) : c.fetched ? parseD(c.fetched).toLocaleDateString('de-DE') : '';
-  return '<h1>' + esc(t) + '</h1><div class="sub">' + esc(st.name || 'Noch kein ETF gewählt') + (when ? ' · Stand ' + when : '') + '</div>';
+  return '<h1>' + esc(t) + '</h1><div class="sub">' + esc(st.name || st.sym.yahoo || st.sym.alpha || st.sym.twelve || 'Noch kein ETF gewählt') + (when ? ' · Stand ' + when : '') + '</div>';
 }
 
 function checks(a) {
@@ -703,7 +734,7 @@ document.addEventListener('click', async e => {
   }
   else if (a === 'pick') {
     S.settings.sym[t.dataset.src] = t.dataset.s; S.settings.name = t.dataset.n; results = [];
-    msg = 'ETF gewählt.'; msgType = 'ok'; save(); view = 'heute'; await refresh(true);
+    msg = ''; save(); view = 'heute'; toastPrefix = 'ETF gewählt · '; await refresh(true);
   }
   else if (a === 'save') { saveSettings(); }
 });
