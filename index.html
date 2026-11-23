@@ -196,7 +196,7 @@ html{overscroll-behavior-y:contain}
 <body>
 <div id="app"></div>
 <script>
-const APP_VERSION = '20261123160854';
+const APP_VERSION = '20261123230100';
 const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25, YAHOO_TTL = 15 * 60000;
 const pad = n => String(n).padStart(2, '0');
 const ds = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -539,6 +539,17 @@ function saveSettings() {
   refresh(true);
 }
 
+/* ---------- Mein Einstieg ---------- */
+function position() {
+  if (!S.log.length) return null;
+  const inv = S.log.reduce((s, e) => s + e.amount, 0), sh = S.log.reduce((s, e) => s + e.shares, 0);
+  if (!(sh > 0)) return null;
+  const last = S.cache.daily.length ? S.cache.daily[S.cache.daily.length - 1].c : null;
+  const value = last == null ? null : last * sh;
+  return { inv, sh, avg: inv / sh, value, pl: value == null ? null : value - inv, plPct: value == null ? null : (value / inv - 1) * 100 };
+}
+const signed = (v, d = 2) => (v >= 0 ? '+' : '−') + num(Math.abs(v), d);
+
 /* ---------- Grafik ---------- */
 function chart(a) {
   const D = S.cache.daily, W = S.cache.weekly;
@@ -553,6 +564,8 @@ function chart(a) {
     wl.push(wi >= 0 ? a.w30[wi] : null);
   });
   const base = [...d.map(x => x.c), ...s20].filter(v => v != null);
+  const pos = position();
+  if (pos) base.push(pos.avg);
   let mn = Math.min(...base), mx = Math.max(...base);
   const padv = (mx - mn) * 0.08 || 1;
   mn -= padv; mx += padv;
@@ -584,6 +597,19 @@ function chart(a) {
     const tx = p[1] === 'start' ? x0 : p[1] === 'end' ? x1 : X(p[0]);
     return '<text x="' + tx.toFixed(1) + '" y="' + (y1 + 18) + '" text-anchor="' + p[1] + '">' + dt(parseD(d[p[0]].d)) + '</text>';
   }).join('');
+  let entrySvg = '';
+  if (pos) {
+    const ey = Y(pos.avg);
+    entrySvg += '<line x1="' + x0 + '" x2="' + x1 + '" y1="' + ey.toFixed(1) + '" y2="' + ey.toFixed(1) + '" stroke="#30d158" stroke-width="1.8"/>' +
+      '<rect x="' + (x1 + 2) + '" y="' + (ey - 8).toFixed(1) + '" width="52" height="16" rx="8" fill="#30d158"/>' +
+      '<text x="' + (x1 + 28) + '" y="' + (ey + 3.6).toFixed(1) + '" text-anchor="middle" style="fill:#fff;font-weight:700">' + num(pos.avg, dec) + '</text>';
+    S.log.forEach(e => {
+      const idx = d.findIndex(x => x.d >= e.date);
+      if (idx < 0 || e.date < d[0].d) return;
+      const cy = Math.max(y0, Math.min(y1, Y(e.price)));
+      entrySvg += '<circle cx="' + X(idx).toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="5.5" fill="#30d158" stroke="var(--solid)" stroke-width="2.2"/>';
+    });
+  }
   const lastX = X(d.length - 1).toFixed(1), lastY = Y(closes[closes.length - 1]).toFixed(1);
   return '<svg viewBox="0 0 ' + Wd + ' ' + H + '" role="img" aria-label="Kursverlauf" style="color:var(--label)">' +
     '<defs><linearGradient id="ga" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a84ff" stop-opacity=".38"/><stop offset="1" stop-color="#0a84ff" stop-opacity="0"/></linearGradient>' +
@@ -594,7 +620,7 @@ function chart(a) {
     '<path d="' + line(wl) + '" fill="none" stroke="#ff453a" stroke-width="3.2" stroke-dasharray="0.1 7" stroke-linecap="round" stroke-linejoin="round"/>' +
     '<path d="' + line(s20) + '" fill="none" stroke="#ff9f0a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
     '<path d="' + pricePath + '" fill="none" stroke="#0a84ff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>' +
-    '</g>' +
+    '</g>' + entrySvg +
     '<circle cx="' + lastX + '" cy="' + lastY + '" r="5" fill="#0a84ff" stroke="var(--solid)" stroke-width="2.2"/>' +
     xl + '</svg>';
 }
@@ -610,16 +636,18 @@ function chartCard(a) {
   const seg = [[30, '1 Monat'], [60, '3 Monate'], [100, 'Alles']]
     .map(r => '<button class="' + (range === r[0] ? 'on' : '') + '" data-a="range" data-n="' + r[0] + '">' + r[1] + '</button>').join('');
   const L = D.length - 1, prev = D[L - 1] ? D[L - 1].c : a.close, chg = (a.close / prev - 1) * 100;
-  const s = status(a);
+  const s = status(a), pos = position();
   const pill = '<button class="pill' + (infoOpen ? ' open' : '') + '" style="--c:var(--' + ({ green: 'green', orange: 'orange', red: 'red', blue: 'blue', gray: 'gray' }[s.color]) + ')" data-a="info" aria-expanded="' + infoOpen + '"><i></i>' + esc(s.short) + '<em>›</em></button>';
   const head = '<div class="pricehead"><div><div class="big">' + num(a.close) + (S.cache.currency ? '<small>' + esc(S.cache.currency) + '</small>' : '') + '</div>' +
     '<div class="chg ' + (chg >= 0 ? 'up' : 'down') + '">' + (chg >= 0 ? '▲ ' : '▼ ') + num(Math.abs(chg)) + ' % <span>zum Vortag</span></div></div>' + pill + '</div>';
   const panel = infoOpen ? '<div class="infopanel"><b>' + esc(s.title) + '</b><p>' + esc(s.text) + '</p>' + checkRows(a) +
     '<div class="note">Alle drei Punkte müssen erfüllt sein, damit der Status auf „Kaufen“ springt.<br>' +
     '<span style="color:#ff9f0a">●</span> 20-Tage-Linie: Durchschnitt der letzten 20 Handelstage.<br>' +
-    '<span style="color:#ff453a">●</span> 30-Wochen-Linie (gepunktet): langfristiger Trend' + (wInRange ? '' : ', liegt außerhalb des Ausschnitts') + '.</div></div>' : '';
+    '<span style="color:#ff453a">●</span> 30-Wochen-Linie (gepunktet): langfristiger Trend' + (wInRange ? '' : ', liegt außerhalb des Ausschnitts') + '.' +
+    (pos ? '<br><span style="color:#30d158">●</span> Einstieg: dein durchschnittlicher Kaufkurs (grüne Linie). Die Punkte sind deine einzelnen Käufe.' : '') + '</div></div>' : '';
   const legend = '<div class="legend"><span><i class="dot" style="margin:0;background:#ff9f0a;color:#ff9f0a"></i>20 Tage <b>' + num(a.s20) + '</b></span>' +
-    '<span><i class="dot" style="margin:0;background:#ff453a;color:#ff453a"></i>30 Wochen <b>' + num(a.w30now) + '</b></span></div>';
+    '<span><i class="dot" style="margin:0;background:#ff453a;color:#ff453a"></i>30 Wochen <b>' + num(a.w30now) + '</b></span>' +
+    (pos ? '<span><i class="dot" style="margin:0;background:#30d158;color:#30d158"></i>Einstieg <b>' + num(pos.avg) + '</b> <b style="color:var(--' + (pos.plPct >= 0 ? 'green' : 'red') + ')">' + signed(pos.plPct, 1) + ' %</b></span>' : '') + '</div>';
   return '<div class="sec">Kursverlauf</div>' +
     '<div class="group">' + head + panel + '<div class="seg">' + seg + '</div>' +
     '<div class="chartbox">' + chart(a) + '</div>' + legend + '</div>';
@@ -701,22 +729,43 @@ function todayView() {
   return h;
 }
 
+function entryForm() {
+  const last = S.cache.daily.length ? S.cache.daily[S.cache.daily.length - 1].c : '';
+  return '<div class="sec">Einstieg nachtragen</div><div class="group">' +
+    '<div class="field"><label for="ed">Datum</label><input id="ed" type="date" value="' + ds(today()) + '" max="' + ds(today()) + '"></div>' +
+    '<div class="field"><label for="ep">Kaufkurs</label><input id="ep" inputmode="decimal" placeholder="z. B. 98,40" value="' + (last === '' ? '' : Number(last).toFixed(2)) + '"></div>' +
+    '<div class="field"><label for="ea">Betrag in €</label><input id="ea" inputmode="decimal" placeholder="z. B. 1000" value="' + (S.settings.budget / 2) + '"></div></div>' +
+    '<button class="btn sec2" data-a="addentry">Einstieg hinzufügen</button>' +
+    '<div class="foot">Für Käufe, die vor dieser App passiert sind. Aus allen Einträgen wird dein durchschnittlicher Einstiegskurs berechnet und in der Grafik als grüne Linie gezeigt.</div>';
+}
+function addEntry() {
+  const g = id => (document.getElementById(id) || { value: '' }).value.replace(',', '.');
+  const date = g('ed'), price = parseFloat(g('ep')), amt = parseFloat(g('ea'));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !(price > 0) || !(amt > 0)) { toast('Bitte Datum, Kurs und Betrag prüfen', 'err'); return; }
+  const id = Date.now();
+  S.log.push({ id, date, window: 'manual-' + id, price, amount: amt, shares: amt / price, firstPrice: price });
+  save(); render(); toast('Einstieg gespeichert', 'ok');
+}
+
 function logView() {
   let h = title('Verlauf') + banner();
-  if (!S.log.length) return h + '<div class="empty">Noch keine Käufe erfasst.<br>Speichere auf „Heute“ deinen ersten Kauf.</div>';
+  if (!S.log.length) return h + '<div class="empty">Noch keine Käufe erfasst.<br>Trage unten deinen Einstieg ein oder speichere auf „Heute“ einen Kauf.</div>' + entryForm();
   const sh = S.log.reduce((s, e) => s + e.shares, 0);
   const inv = S.log.reduce((s, e) => s + e.amount, 0);
   const sav = S.log.reduce((s, e) => s + (e.firstPrice - e.price) * e.shares, 0);
   h += '<div class="sec">Gesamt</div><div class="group">' +
     '<div class="row"><span class="k">Investiert</span><span class="v strong">' + num(inv, 0) + ' €</span></div>' +
+    (position() ? '<div class="row"><span class="k">Ø Einstiegskurs</span><span class="v strong">' + num(position().avg) + '</span></div>' +
+      (position().value != null ? '<div class="row"><span class="k">Wert heute</span><span class="v strong">' + num(position().value, 0) + ' €</span></div>' +
+      '<div class="row"><span class="k">Gewinn / Verlust</span><span class="v strong" style="color:var(--' + (position().pl >= 0 ? 'green' : 'red') + ')">' + signed(position().pl, 0) + ' € (' + signed(position().plPct, 1) + ' %)</span></div>' : '') : '') +
     '<div class="row"><span class="k">Anteile</span><span class="v strong">' + num(sh, 3) + '</span></div>' +
-    '<div class="row"><span class="k">Ersparnis<small>gegenüber Kauf am ersten Fenstertag</small></span><span class="v strong">' + num(sav, 2) + '</span></div></div>';
+    (sav !== 0 ? '<div class="row"><span class="k">Ersparnis<small>gegenüber Kauf am ersten Fenstertag</small></span><span class="v strong">' + num(sav, 2) + '</span></div>' : '') + '</div>';
   h += '<div class="sec">Käufe</div><div class="group">' +
-    [...S.log].reverse().map(e =>
-      '<div class="row"><span class="k">' + esc(e.date) + '<small>' + num(e.price) + ' · ' + num(e.shares, 3) + ' Anteile · ' + num((e.firstPrice - e.price) * e.shares, 2) + ' gespart</small></span>' +
-      '<span class="v strong">' + num(e.amount, 0) + ' €</span><button class="link del" data-a="del" data-id="' + e.id + '">Löschen</button></div>'
+    [...S.log].sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : y.id - x.id)).map(e =>
+      '<div class="row"><span class="k">' + parseD(e.date).toLocaleDateString('de-DE') + '<small>' + num(e.price) + ' · ' + num(e.shares, 3) + ' Anteile' + (e.firstPrice !== e.price ? ' · ' + num((e.firstPrice - e.price) * e.shares, 2) + ' gespart' : '') + '</small></span>' +
+      '<span class="v strong" style="white-space:nowrap">' + num(e.amount, 0) + ' €</span><button class="link del" data-a="del" data-id="' + e.id + '">Löschen</button></div>'
     ).join('') + '</div>';
-  return h;
+  return h + entryForm();
 }
 
 function resultGroup(src) {
@@ -781,6 +830,7 @@ document.addEventListener('click', async e => {
   const a = t.dataset.a;
   if (!['search', 'refresh', 'range', 'theme', 'prov'].includes(a)) msg = '';
   if (a === 'tab') { view = t.dataset.v; window.scrollTo(0, 0); render(); }
+  else if (a === 'addentry') { addEntry(); }
   else if (a === 'err') { errOpen = !errOpen; render(); }
   else if (a === 'info') { infoOpen = !infoOpen; render(); }
   else if (a === 'range') { range = Number(t.dataset.n); render(); }
