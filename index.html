@@ -644,17 +644,17 @@ function settingsView() {
     '<div class="foot">Auto probiert die Quellen der Reihe nach und nimmt die erste, die klappt. Jede Quelle braucht ihr eigenes Symbol, weil dasselbe Wertpapier je nach Anbieter anders heißt.</div>' +
 
     '<div class="sec">Yahoo Finance · ohne Schlüssel</div><div class="group">' +
-    '<div class="field"><label for="ysym">Symbol</label><input id="ysym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYY.DE" value="' + esc(st.sym.yahoo) + '"></div>' +
+    '<div class="field"><label for="ysym">Symbol</label><input id="ysym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYI.DE" value="' + esc(st.sym.yahoo) + '"></div>' +
     '<div class="field"><label for="qy">Suche</label><input id="qy" autocomplete="off" placeholder="Name oder ISIN"></div></div>' +
     '<button class="btn sec2" data-a="search" data-src="yahoo">Bei Yahoo suchen</button>' + resultGroup('yahoo') +
 
     '<div class="sec">Twelve Data</div><div class="group">' +
     '<div class="field"><label for="tkey">Schlüssel</label><input id="tkey" type="password" autocomplete="off" placeholder="API-Schlüssel" value="' + esc(st.keys.twelve) + '"></div>' +
-    '<div class="field"><label for="tsym">Symbol</label><input id="tsym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYY" value="' + esc(st.sym.twelve) + '"></div></div>' +
+    '<div class="field"><label for="tsym">Symbol</label><input id="tsym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYI" value="' + esc(st.sym.twelve) + '"></div></div>' +
 
     '<div class="sec">Alpha Vantage</div><div class="group">' +
     '<div class="field"><label for="key">Schlüssel</label><input id="key" type="password" autocomplete="off" placeholder="API-Schlüssel" value="' + esc(st.keys.alpha) + '"></div>' +
-    '<div class="field"><label for="asym">Symbol</label><input id="asym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYY.DEX" value="' + esc(st.sym.alpha) + '"></div>' +
+    '<div class="field"><label for="asym">Symbol</label><input id="asym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYI.DEX" value="' + esc(st.sym.alpha) + '"></div>' +
     '<div class="field"><label for="qa">Suche</label><input id="qa" autocomplete="off" placeholder="Name"></div></div>' +
     '<button class="btn sec2" data-a="search" data-src="alpha">Bei Alpha Vantage suchen (1 Anfrage)</button>' + resultGroup('alpha') +
     '<div class="foot">Schlüssel bleiben nur auf diesem Gerät.</div>' +
