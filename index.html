@@ -196,7 +196,7 @@ html{overscroll-behavior-y:contain}
 <body>
 <div id="app"></div>
 <script>
-const APP_VERSION = '20261124064627';
+const APP_VERSION = '20261124073229';
 const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25, YAHOO_TTL = 15 * 60000;
 const pad = n => String(n).padStart(2, '0');
 const ds = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -474,6 +474,7 @@ async function av(fn, sym, key, extra) {
 }
 async function fromAlpha(sym, key) {
   const daily = await av('TIME_SERIES_DAILY', sym, key, '&outputsize=compact');
+  await new Promise(r => setTimeout(r, 1500));
   const weekly = await av('TIME_SERIES_WEEKLY', sym, key, '');
   return { daily, weekly, via: '', liveTime: 0, currency: '' };
 }
