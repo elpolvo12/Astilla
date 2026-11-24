@@ -196,7 +196,7 @@ html{overscroll-behavior-y:contain}
 <body>
 <div id="app"></div>
 <script>
-const APP_VERSION = '20261123232459';
+const APP_VERSION = '20261124063825';
 const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25, YAHOO_TTL = 15 * 60000;
 const pad = n => String(n).padStart(2, '0');
 const ds = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -244,6 +244,10 @@ function load() {
       b.cache.limits = Object.assign({}, (d.cache && d.cache.limits) || {});
       if (d.cache && d.cache.limitDate && !b.cache.limits.alpha) b.cache.limits.alpha = d.cache.limitDate;
       if (d.cache && d.cache.symbol && d.cache.symbol === s.symbol && !b.cache.sig) { b.cache.sig = sigOf(b.settings.sym); b.cache.source = b.cache.source || 'alpha'; }
+      /* Twelve-Daten ohne Börse stammen vermutlich von einem falschen Wertpapier (z. B. US-SPYI): verwerfen */
+      if (b.cache.source === 'twelve' && !String(b.settings.sym.twelve || '').includes(':')) {
+        b.cache.daily = []; b.cache.weekly = []; b.cache.fetched = ''; b.cache.at = 0; b.cache.checkedAt = 0; b.cache.source = ''; b.cache.sig = '';
+      }
       Object.assign(b.usage, d.usage || {});
       b.log = Array.isArray(d.log) ? d.log : [];
     }
@@ -416,7 +420,8 @@ async function fromYahoo(sym) {
 
 /* Twelve Data: Schlüssel nötig, Gratis-Plan hat Limits und nicht jede Börse */
 async function twelveSeries(sym, key, interval, size) {
-  const url = 'https://api.twelvedata.com/time_series?symbol=' + enc(sym) + '&interval=' + interval + '&outputsize=' + size + '&apikey=' + enc(key);
+  const parts = sym.split(':');
+  const url = 'https://api.twelvedata.com/time_series?symbol=' + enc(parts[0]) + (parts[1] ? '&exchange=' + enc(parts[1]) : '') + '&interval=' + interval + '&outputsize=' + size + '&apikey=' + enc(key);
   const { j } = await fetchJSON(url, false);
   if (j.status === 'error') {
     if (j.code === 429) throw limitError(j.message);
@@ -425,6 +430,7 @@ async function twelveSeries(sym, key, interval, size) {
   return dedupe((j.values || []).map(v => ({ d: String(v.datetime).slice(0, 10), c: parseFloat(v.close) })).filter(x => isFinite(x.c)));
 }
 async function fromTwelve(sym, key) {
+  if (!sym.includes(':')) throw new Error('Börse fehlt. Trage das Symbol mit Börse ein, z. B. SPYI:XETR. Ohne Börse liefert Twelve Data ein US-Wertpapier mit gleichem Kürzel.');
   const daily = await twelveSeries(sym, key, '1day', 120);
   const weekly = await twelveSeries(sym, key, '1week', 60);
   return { daily, weekly, via: '', liveTime: 0, currency: '' };
@@ -493,11 +499,17 @@ async function refresh(force) {
     try {
       const r = await fetchSource(p);
       if (r.daily.length < 2) throw new Error('Zu wenige Kursdaten');
+      let dev = '';
+      if (c.sig === sig && c.daily.length) {
+        const prev = c.daily[c.daily.length - 1].c, nowp = r.daily[r.daily.length - 1].c;
+        if (prev > 0 && (nowp / prev > 1.35 || nowp / prev < 0.74)) dev = 'Kurs weicht stark vom vorigen Stand ab (' + num(prev) + ' → ' + num(nowp) + '). Prüfe das Symbol.';
+      }
       const limits = Object.assign({}, c.limits); limits[p] = '';
       S.cache = { fetched: ds(today()), at: r.dataAt || Date.now(), checkedAt: Date.now(), source: p, via: r.via || '', sig, daily: r.daily, weekly: r.weekly,
                   error: '', detail: '', limits, liveTime: r.liveTime || 0, currency: r.currency || '' };
       busy = false; save(); render();
-      if (force) toast(toastPrefix + 'Kurse geladen (' + PROV[p].name + (r.via ? ', Proxy' : '') + ')', 'ok');
+      if (dev) toast(dev, 'err', 7000);
+      else if (force) toast(toastPrefix + 'Kurse geladen (' + PROV[p].name + (r.via ? ', Proxy' : '') + ')', 'ok');
       toastPrefix = ''; return;
     } catch (err) {
       if (err.limit) { c.limits[p] = ds(today()); detail = err.detail; errs.push(PROV[p].name + ': ' + limitText(err.detail, p)); }
@@ -811,7 +823,7 @@ function settingsView() {
 
     '<div class="sec">Twelve Data</div><div class="group">' +
     '<div class="field"><label for="tkey">Schlüssel</label><input id="tkey" type="password" autocomplete="off" placeholder="API-Schlüssel" value="' + esc(st.keys.twelve) + '"></div>' +
-    '<div class="field"><label for="tsym">Symbol</label><input id="tsym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYI" value="' + esc(st.sym.twelve) + '"></div></div>' +
+    '<div class="field"><label for="tsym">Symbol</label><input id="tsym" autocomplete="off" autocapitalize="characters" placeholder="z. B. SPYI:XETR" value="' + esc(st.sym.twelve) + '"></div></div>' +
 
     '<div class="sec">Alpha Vantage</div><div class="group">' +
     '<div class="field"><label for="key">Schlüssel</label><input id="key" type="password" autocomplete="off" placeholder="API-Schlüssel" value="' + esc(st.keys.alpha) + '"></div>' +
