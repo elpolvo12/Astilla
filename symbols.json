@@ -1,3 +1,9 @@
 [
-  { "symbol": "SPYI.DE", "isin": "IE00B3YLTY66", "stooq": "spyi.de", "alpha": "SPYI.DEX", "currency": "EUR" }
+  {
+    "symbol": "SPYI.DE",
+    "isin": "IE00B3YLTY66",
+    "stooq": "spyi.de",
+    "alpha": "SPYI.DEX",
+    "currency": "EUR"
+  }
 ]
