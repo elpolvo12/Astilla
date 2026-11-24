@@ -178,7 +178,7 @@ html{overscroll-behavior-y:contain}
 .legend b{color:var(--label);font-weight:600}
 .pricehead .big{font-size:38px;font-weight:700;letter-spacing:.2px;line-height:1.1}
 .pricehead .big small{font-size:17px;font-weight:600;color:var(--label2);margin-left:6px}
-.pricehead .chg{font-size:15px;font-weight:600;margin-top:2px}
+.pricehead .chg{font-size:15px;font-weight:600;margin-top:2px;white-space:nowrap}
 .pricehead .chg.up{color:var(--green)}.pricehead .chg.down{color:var(--red)}.pricehead .chg span{color:var(--label2);font-weight:500}
 /* ---------- Meldung oben (Toast) ---------- */
 .toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 10px);transform:translate(-50%,-140%);z-index:20;width:max-content;max-width:calc(100vw - 32px);
@@ -196,7 +196,7 @@ html{overscroll-behavior-y:contain}
 <body>
 <div id="app"></div>
 <script>
-const APP_VERSION = '20261124073229';
+const APP_VERSION = '20261124080238';
 const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25, YAHOO_TTL = 15 * 60000;
 const pad = n => String(n).padStart(2, '0');
 const ds = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -293,6 +293,13 @@ function windowOf(d) {
     : { key: base + '-B', start: new Date(y, m, 16), end: new Date(y, m, last) };
 }
 
+/* Summe aller Käufe im laufenden Monat und ob das Monatsbudget schon erreicht ist */
+function monthTotal() {
+  const key = ds(today()).slice(0, 7);
+  return S.log.reduce((s, e) => s + (String(e.date).slice(0, 7) === key ? e.amount : 0), 0);
+}
+const budgetReached = () => monthTotal() >= S.settings.budget - 0.5;
+
 function sma(arr, n, i) {
   if (i < n - 1) return null;
   let s = 0;
@@ -337,6 +344,14 @@ function status(a) {
   const t = today(), win = windowOf(t);
   const bought = S.log.find(e => e.window === win.key);
   const lastDay = ds(t) === ds(win.end);
+  if (budgetReached()) {
+    const sumTxt = num(monthTotal(), 0) + ' von ' + num(S.settings.budget, 0) + ' €';
+    if (a && !staleData() && a.green)
+      return { short: 'Optional', color: 'green', icon: '✓', title: 'Budget erreicht, Kauf optional',
+               text: 'Diesen Monat hast du schon ' + sumTxt + ' gekauft. Das Signal steht trotzdem auf Kaufen. Du kannst zusätzlich kaufen, musst aber nicht.' };
+    return { short: 'Budget erreicht', color: 'blue', icon: '✓', title: 'Monatsbudget erreicht',
+             text: 'Diesen Monat hast du ' + sumTxt + ' gekauft. Kein Zwangskauf mehr. Ein Kauf wäre nur freiwillig, wenn das Signal auf Kaufen springt.' };
+  }
   if (bought) return { short: 'Erledigt', color: 'blue', icon: '✓', title: 'Erledigt', text: 'In diesem Zeitfenster hast du schon gekauft.' };
   if (busy && !a) return { short: 'Lädt …', color: 'blue', icon: '…', title: 'Lädt Kurse …', text: 'Einen Moment bitte.' };
   /* Zwangskauf-Hinweis hängt nur vom Datum ab und kommt auch ohne oder mit alten Kursdaten */
@@ -564,9 +579,10 @@ function buy() {
   const amt = parseFloat(document.getElementById('ba').value.replace(',', '.'));
   if (!(p > 0) || !(amt > 0)) { msg = 'Bitte Kurs und Betrag prüfen.'; msgType = 'err'; render(); return; }
   const t = today(), win = windowOf(t);
-  if (S.log.some(e => e.window === win.key)) { msg = 'Für dieses Fenster gibt es schon einen Kauf.'; msgType = 'err'; render(); return; }
+  const extra = budgetReached();
+  if (!extra && S.log.some(e => e.window === win.key)) { msg = 'Für dieses Fenster gibt es schon einen Kauf.'; msgType = 'err'; render(); return; }
   const first = S.cache.daily.find(x => { const d = parseD(x.d); return d >= win.start && d <= win.end; });
-  S.log.push({ id: Date.now(), date: ds(t), window: win.key, price: p, amount: amt, shares: amt / p, firstPrice: first ? first.c : p });
+  S.log.push({ id: Date.now(), date: ds(t), window: extra ? 'extra-' + Date.now() : win.key, price: p, amount: amt, shares: amt / p, firstPrice: first ? first.c : p });
   save(); msg = ''; render(); toast('Kauf gespeichert ✓', 'ok');
 }
 
@@ -749,6 +765,7 @@ function todayView() {
   const days = Math.round((win.end - t) / DAY);
   const bought = S.log.find(e => e.window === win.key);
   const half = st.budget / 2;
+  const mSum = monthTotal(), done = budgetReached(), remaining = Math.max(0, st.budget - mSum), suggest = Math.min(half, remaining) || half;
   const winText = win.start.getDate() + '.–' + win.end.getDate() + '. ' + monShort(win.end);
   let h = title('Heute') + banner();
   if (!a) h += '<div class="hero"><div class="badge ' + s.color + '">' + s.icon + '</div><b>' + esc(s.title) + '</b><span>' + esc(s.text) + '</span></div>';
@@ -762,15 +779,19 @@ function todayView() {
   h += '<div class="sec">Aktuelles Fenster</div><div class="group">' +
     '<div class="row"><span class="k">Zeitraum</span><span class="v strong">' + winText + '</span></div>' +
     '<div class="row"><span class="k">Noch</span><span class="v strong">' + (days > 0 ? days + (days === 1 ? ' Tag' : ' Tage') : 'Heute letzter Tag') + '</span></div>' +
-    '<div class="row"><span class="k">Betrag</span><span class="v strong">' + num(half, 0) + ' €</span></div></div>';
-  if (bought) {
+    (done ? '' : '<div class="row"><span class="k">Betrag<small>' + (suggest < half ? 'Rest bis zum Monatsbudget' : 'Hälfte des Monatsbudgets') + '</small></span><span class="v strong">' + num(suggest, 0) + ' €</span></div>') +
+    '<div class="row"><span class="k">Diesen Monat gekauft</span><span class="v strong" style="color:var(--' + (done ? 'green' : 'label') + ')">' + num(mSum, 0) + ' von ' + num(st.budget, 0) + ' €</span></div>' +
+    '<div class="row" style="display:block;padding-top:0;min-height:0;padding-bottom:14px"><div class="bar' + (done ? '' : '') + '"><i style="width:' + Math.min(100, st.budget ? mSum / st.budget * 100 : 0) + '%"></i></div></div></div>';
+  const buyForm = (title, amount, foot) => '<div class="sec">' + title + '</div><div class="group">' +
+    '<div class="field"><label for="bp">Kurs</label><input id="bp" inputmode="decimal" value="' + a.close.toFixed(2) + '"></div>' +
+    '<div class="field"><label for="ba">Betrag in €</label><input id="ba" inputmode="decimal" value="' + amount + '"></div></div>' +
+    '<button class="btn" data-a="buy">Kauf speichern</button><div class="foot">' + foot + '</div>';
+  if (done) {
+    if (a && a.green && !staleData()) h += buyForm('Zusätzlicher Kauf (freiwillig)', half, 'Dein Monatsbudget ist erreicht. Das Signal empfiehlt trotzdem einen Kauf. Du entscheidest.');
+  } else if (bought) {
     h += '<div class="sec">Kauf</div><div class="group"><div class="row"><span class="k">Gekauft am ' + esc(bought.date) + '</span><span class="v strong">' + num(bought.price) + '</span></div></div>';
   } else if (a) {
-    h += '<div class="sec">Kauf erfassen</div><div class="group">' +
-      '<div class="field"><label for="bp">Kurs</label><input id="bp" inputmode="decimal" value="' + a.close.toFixed(2) + '"></div>' +
-      '<div class="field"><label for="ba">Betrag in €</label><input id="ba" inputmode="decimal" value="' + half + '"></div></div>' +
-      '<button class="btn" data-a="buy">Kauf speichern</button>' +
-      '<div class="foot">Der Kurs ist der zuletzt geladene Kurs. Passe ihn an, wenn du anders gekauft hast.</div>';
+    h += buyForm('Kauf erfassen', suggest, 'Der Kurs ist der zuletzt geladene Kurs. Passe ihn an, wenn du anders gekauft hast.');
   }
   h += limitCard();
   h += '<button class="btn sec2" data-a="refresh">' + (busy ? 'Lädt …' : 'Kurse aktualisieren') + '</button>';
