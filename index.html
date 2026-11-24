@@ -196,7 +196,7 @@ html{overscroll-behavior-y:contain}
 <body>
 <div id="app"></div>
 <script>
-const APP_VERSION = '20261124080238';
+const APP_VERSION = '20261124131003';
 const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25, YAHOO_TTL = 15 * 60000;
 const pad = n => String(n).padStart(2, '0');
 const ds = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -222,7 +222,7 @@ const sigOf = sym => [sym.yahoo, sym.twelve, sym.alpha].join('|');
 function defaults() {
   return {
     settings: { provider: 'auto', keys: { twelve: '', alpha: '' }, sym: { yahoo: '', twelve: '', alpha: '' }, name: '',
-                budget: 1000, tolUp: 1, tolDown: 3, pullback: 1, theme: 'dark' },
+                budget: 1000, tolUp: 1, tolDown: 3, pullback: 1, theme: 'dark', lastBackup: 0 },
     cache: { fetched: '', at: 0, checkedAt: 0, source: '', via: '', sig: '', daily: [], weekly: [], error: '', detail: '', limits: {}, liveTime: 0, currency: '' },
     usage: { date: '', n: 0 },
     log: []
@@ -603,6 +603,49 @@ function saveSettings() {
   refresh(true);
 }
 
+/* ---------- Sichern und Wiederherstellen ---------- */
+async function backup() {
+  const data = { app: 'astilla', version: 1, saved: new Date().toISOString(), log: S.log,
+                 settings: Object.assign({}, S.settings, { keys: { twelve: '', alpha: '' }, lastBackup: 0 }) };
+  const name = 'astilla-sicherung-' + ds(today()) + '.json';
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  try {
+    const file = new File([blob], name, { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Astilla Sicherung' });
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }
+    S.settings.lastBackup = Date.now(); save(); render(); toast('Sicherung erstellt', 'ok');
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;
+    toast('Sichern nicht möglich', 'err');
+  }
+}
+function restoreFrom(text) {
+  let d;
+  try { d = JSON.parse(text); } catch (e) { toast('Datei nicht lesbar', 'err'); return; }
+  if (!d || d.app !== 'astilla' || !Array.isArray(d.log)) { toast('Das ist keine Astilla-Sicherung', 'err'); return; }
+  const log = d.log.filter(e => e && /^\d{4}-\d{2}-\d{2}$/.test(e.date) && e.price > 0 && e.amount > 0).map((e, i) => ({
+    id: Number(e.id) || Date.now() + i, date: e.date, window: String(e.window || 'manual-' + i), price: +e.price, amount: +e.amount,
+    shares: e.shares > 0 ? +e.shares : e.amount / e.price, firstPrice: e.firstPrice > 0 ? +e.firstPrice : +e.price }));
+  if (!confirm(log.length + ' Käufe aus der Sicherung laden? Deine jetzigen Käufe werden ersetzt.')) return;
+  const keys = S.settings.keys;
+  if (d.settings && typeof d.settings === 'object') {
+    const s = d.settings;
+    ['budget', 'tolUp', 'tolDown', 'pullback'].forEach(k => { if (isFinite(s[k])) S.settings[k] = +s[k]; });
+    if (s.sym && typeof s.sym === 'object') ['yahoo', 'twelve', 'alpha'].forEach(k => { if (typeof s.sym[k] === 'string') S.settings.sym[k] = s.sym[k]; });
+    if (typeof s.name === 'string') S.settings.name = s.name;
+    if (['auto', 'repo', 'yahoo', 'twelve', 'alpha'].includes(s.provider)) S.settings.provider = s.provider;
+  }
+  S.settings.keys = keys;
+  S.log = log;
+  save(); render(); toast(log.length + ' Käufe wiederhergestellt', 'ok');
+}
+
 /* ---------- Mein Einstieg ---------- */
 function position() {
   if (!S.log.length) return null;
@@ -834,6 +877,7 @@ function logView() {
       '<div class="row"><span class="k">' + parseD(e.date).toLocaleDateString('de-DE') + '<small>' + num(e.price) + ' · ' + num(e.shares, 3) + ' Anteile' + (e.firstPrice !== e.price ? ' · ' + num((e.firstPrice - e.price) * e.shares, 2) + ' gespart' : '') + '</small></span>' +
       '<span class="v strong" style="white-space:nowrap">' + num(e.amount, 0) + ' €</span><button class="link del" data-a="del" data-id="' + e.id + '">Löschen</button></div>'
     ).join('') + '</div>';
+  if (!S.settings.lastBackup) h += '<div class="foot">Tipp: Sichere deine Käufe unter Einstellungen → Daten sichern. Sie liegen nur in diesem Browser.</div>';
   return h + entryForm();
 }
 
@@ -850,6 +894,11 @@ function settingsView() {
     '<button class="' + (cur === x[0] ? 'on' : '') + '" data-a="' + act + '" data-v="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
   return title('Einstellungen') + banner() +
     '<div class="sec">Darstellung</div><div class="group">' + seg([['auto', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']], st.theme, 'theme') + '</div>' +
+    '<div class="sec">Daten sichern</div><div class="group">' +
+    '<div class="row"><span class="k">Sichern<small>Käufe und Einstellungen als Datei, ohne Schlüssel</small></span><button class="link" data-a="backup">Sichern</button></div>' +
+    '<div class="row"><span class="k">Wiederherstellen<small>Aus einer Sicherungsdatei laden</small></span><button class="link" data-a="restore">Datei wählen</button></div>' +
+    '<div class="row"><span class="k">Zuletzt gesichert</span><span class="v">' + (st.lastBackup ? stamp(st.lastBackup) : 'noch nie') + '</span></div></div>' +
+    '<input type="file" id="restoreFile" accept="application/json,.json" style="display:none">' +
     '<div class="sec">Datenquelle</div><div class="group">' + seg([['auto', 'Auto'], ['repo', 'Datei'], ['yahoo', 'Yahoo'], ['twelve', 'Twelve'], ['alpha', 'Alpha']], st.provider, 'prov') + '</div>' +
     '<div class="foot">Auto probiert die Quellen der Reihe nach und nimmt die erste, die klappt. „Datei“ und „Yahoo“ nutzen dasselbe Yahoo-Symbol, die anderen Quellen brauchen ihr eigenes.</div>' +
 
@@ -900,6 +949,8 @@ document.addEventListener('click', async e => {
   if (!['search', 'refresh', 'range', 'theme', 'prov'].includes(a)) msg = '';
   if (a === 'tab') { view = t.dataset.v; window.scrollTo(0, 0); render(); }
   else if (a === 'addentry') { addEntry(); }
+  else if (a === 'backup') { await backup(); }
+  else if (a === 'restore') { const f = document.getElementById('restoreFile'); if (f) f.click(); }
   else if (a === 'err') { errOpen = !errOpen; render(); }
   else if (a === 'info') { infoOpen = !infoOpen; render(); }
   else if (a === 'range') { range = Number(t.dataset.n); render(); }
@@ -919,6 +970,15 @@ document.addEventListener('click', async e => {
     msg = ''; save(); view = 'heute'; toastPrefix = 'ETF gewählt · '; await refresh(true);
   }
   else if (a === 'save') { saveSettings(); }
+});
+
+document.addEventListener('change', e => {
+  if (!e.target || e.target.id !== 'restoreFile' || !e.target.files || !e.target.files[0]) return;
+  const f = e.target.files[0], r = new FileReader();
+  r.onload = () => restoreFrom(String(r.result));
+  r.onerror = () => toast('Datei nicht lesbar', 'err');
+  r.readAsText(f);
+  e.target.value = '';
 });
 
 /* Live-Aktualisierung: alle 5 Minuten prüfen, geladen wird nur, wenn die Daten älter als 15 Minuten sind */
