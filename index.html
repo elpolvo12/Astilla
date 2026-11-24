@@ -196,7 +196,7 @@ html{overscroll-behavior-y:contain}
 <body>
 <div id="app"></div>
 <script>
-const APP_VERSION = '20261124063825';
+const APP_VERSION = '20261124064338';
 const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25, YAHOO_TTL = 15 * 60000;
 const pad = n => String(n).padStart(2, '0');
 const ds = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -373,7 +373,12 @@ async function fetchJSON(url, proxyOK) {
   for (const [label, u, via] of tries) {
     try {
       const r = await fetch(u);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) {
+        let m = '';
+        try { const j = await r.json(); m = j.message || j.Information || j.Note || (j.error && (j.error.message || j.error)) || ''; } catch (e2) {}
+        if (r.status === 429) throw limitError(m);
+        throw new Error('HTTP ' + r.status + (m ? ': ' + String(m).slice(0, 140) : ''));
+      }
       return { j: await r.json(), via };
     } catch (e) {
       /* Bei normalen API-Fehlern (z. B. 404) lohnt sich kein weiterer Weg nicht, bei Sperren schon */
@@ -737,10 +742,10 @@ function todayView() {
   let h = title('Heute') + banner();
   if (!a) h += '<div class="hero"><div class="badge ' + s.color + '">' + s.icon + '</div><b>' + esc(s.title) + '</b><span>' + esc(s.text) + '</span></div>';
   if (S.cache.error) {
-    const lim = anyLimitToday();
+    const lim = /limit|zu viele anfragen/i.test(S.cache.error);
     const sum = (lim ? 'Limit erreicht' : 'Kurse konnten nicht geladen werden') + (S.cache.daily.length ? ', letzter Stand wird angezeigt' : '') + '.';
     h += '<div class="alert errc" data-a="err"><b>' + (lim ? 'Limit erreicht' : 'Abruf fehlgeschlagen') + '<em>' + (errOpen ? '▾' : 'Details ›') + '</em></b>' +
-      (errOpen ? esc(S.cache.error).replace(/\n/g, '<br>') + (S.cache.detail ? '<small>Meldung des Anbieters: ' + esc(S.cache.detail) + '</small>' : '') : esc(sum)) + '</div>';
+      (errOpen ? esc(S.cache.error).replace(/\n/g, '<br>') + (S.settings.provider !== 'auto' ? '<small>Tipp: Stelle die Datenquelle in den Einstellungen auf „Auto“. Dann probiert die App die nächste Quelle, wenn diese ausfällt.</small>' : '') + (S.cache.detail ? '<small>Meldung des Anbieters: ' + esc(S.cache.detail) + '</small>' : '') : esc(sum)) + '</div>';
   }
   if (a) h += chartCard(a);
   h += '<div class="sec">Aktuelles Fenster</div><div class="group">' +
