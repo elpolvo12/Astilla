@@ -82,8 +82,14 @@ async function alphaSeries(sym, fn, extra) {
 async function fromAlpha(want) {
   if (!process.env.ALPHA_KEY) throw new Error('kein Secret ALPHA_KEY');
   const sym = want.alpha || want.symbol;
-  const daily = await alphaSeries(sym, 'TIME_SERIES_DAILY', '&outputsize=compact');
-  const weekly = await alphaSeries(sym, 'TIME_SERIES_WEEKLY');
+  /* Gratis-Schlüssel: höchstens eine Anfrage pro Sekunde. Pause dazwischen, bei Drosselung einmal wiederholen. */
+  const get = async (fn, extra) => {
+    try { return await alphaSeries(sym, fn, extra); }
+    catch (e) { if (!/spreading|per second/i.test(e.message)) throw e; await sleep(8000); return await alphaSeries(sym, fn, extra); }
+  };
+  const daily = await get('TIME_SERIES_DAILY', '&outputsize=compact');
+  await sleep(2000);
+  const weekly = await get('TIME_SERIES_WEEKLY');
   return { name: want.symbol, currency: want.currency || '', liveTime: 0, daily, weekly };
 }
 
