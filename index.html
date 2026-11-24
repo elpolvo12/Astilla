@@ -196,7 +196,7 @@ html{overscroll-behavior-y:contain}
 <body>
 <div id="app"></div>
 <script>
-const APP_VERSION = '20261124064338';
+const APP_VERSION = '20261124064627';
 const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25, YAHOO_TTL = 15 * 60000;
 const pad = n => String(n).padStart(2, '0');
 const ds = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -377,7 +377,7 @@ async function fetchJSON(url, proxyOK) {
         let m = '';
         try { const j = await r.json(); m = j.message || j.Information || j.Note || (j.error && (j.error.message || j.error)) || ''; } catch (e2) {}
         if (r.status === 429) throw limitError(m);
-        throw new Error('HTTP ' + r.status + (m ? ': ' + String(m).slice(0, 140) : ''));
+        throw new Error('HTTP ' + r.status + (m ? ': ' + clean(m).slice(0, 140) : ''));
       }
       return { j: await r.json(), via };
     } catch (e) {
@@ -389,6 +389,7 @@ async function fetchJSON(url, proxyOK) {
   const e = new Error(errs.join(', ')); e.multi = true; throw e;
 }
 
+const clean = s => String(s || '').replace(/\*\*/g, '').replace(/\s*Please provide[^.]*\.?.*$/i, '').trim();
 function dedupe(list) {
   const m = new Map();
   list.forEach(x => m.set(x.d, x));
@@ -426,13 +427,22 @@ async function fromYahoo(sym) {
 /* Twelve Data: Schlüssel nötig, Gratis-Plan hat Limits und nicht jede Börse */
 async function twelveSeries(sym, key, interval, size) {
   const parts = sym.split(':');
-  const url = 'https://api.twelvedata.com/time_series?symbol=' + enc(parts[0]) + (parts[1] ? '&exchange=' + enc(parts[1]) : '') + '&interval=' + interval + '&outputsize=' + size + '&apikey=' + enc(key);
-  const { j } = await fetchJSON(url, false);
-  if (j.status === 'error') {
-    if (j.code === 429) throw limitError(j.message);
-    throw new Error(j.message || 'Fehler bei Twelve Data');
+  const base = 'https://api.twelvedata.com/time_series?symbol=' + enc(parts[0]);
+  const tail = '&interval=' + interval + '&outputsize=' + size + '&apikey=' + enc(key);
+  /* Die Börse als Börsen-Code (mic_code) probieren, danach als Börsenname (exchange) */
+  const variants = parts[1] ? ['&mic_code=' + enc(parts[1]), '&exchange=' + enc(parts[1])] : [''];
+  let last;
+  for (const v of variants) {
+    try {
+      const { j } = await fetchJSON(base + v + tail, false);
+      if (j.status === 'error') {
+        if (j.code === 429) throw limitError(j.message);
+        throw new Error(clean(j.message) || 'Fehler bei Twelve Data');
+      }
+      return dedupe((j.values || []).map(x => ({ d: String(x.datetime).slice(0, 10), c: parseFloat(x.close) })).filter(x => isFinite(x.c)));
+    } catch (e) { if (e.limit) throw e; last = e; }
   }
-  return dedupe((j.values || []).map(v => ({ d: String(v.datetime).slice(0, 10), c: parseFloat(v.close) })).filter(x => isFinite(x.c)));
+  throw last;
 }
 async function fromTwelve(sym, key) {
   if (!sym.includes(':')) throw new Error('Börse fehlt. Trage das Symbol mit Börse ein, z. B. SPYI:XETR. Ohne Börse liefert Twelve Data ein US-Wertpapier mit gleichem Kürzel.');
