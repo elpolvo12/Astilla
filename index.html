@@ -161,7 +161,12 @@ html{overscroll-behavior-y:contain}
 .pill{--c:var(--gray);display:inline-flex;align-items:center;gap:7px;padding:7px 12px;margin-top:4px;border-radius:999px;font:inherit;font-size:13px;font-weight:700;color:var(--c);cursor:pointer;white-space:nowrap;
   background:color-mix(in srgb,var(--c) 16%,transparent);border:1px solid color-mix(in srgb,var(--c) 40%,transparent);
   -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
-.pill i{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 8px var(--c)}
+.pricehead>div{flex:none}
+.pill{flex:0 1 auto;min-width:0;max-width:100%}
+.pill span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill em{flex:none}
+@media (max-width:400px){.pill{gap:6px;padding:7px 10px;font-size:12px}.pill em{display:none}}
+.pill i{flex:none;width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 8px var(--c)}
 .pill em{font-style:normal;opacity:.7;transition:transform .2s;display:inline-block}
 .pill.open em{transform:rotate(90deg)}
 .pill:active{opacity:.7}
@@ -744,7 +749,7 @@ function chartCard(a) {
     .map(r => '<button class="' + (range === r[0] ? 'on' : '') + '" data-a="range" data-n="' + r[0] + '">' + r[1] + '</button>').join('');
   const L = D.length - 1, prev = D[L - 1] ? D[L - 1].c : a.close, chg = (a.close / prev - 1) * 100;
   const s = status(a), pos = position();
-  const pill = '<button class="pill' + (infoOpen ? ' open' : '') + '" style="--c:var(--' + ({ green: 'green', orange: 'orange', red: 'red', blue: 'blue', gray: 'gray' }[s.color]) + ')" data-a="info" aria-expanded="' + infoOpen + '"><i></i>' + esc(s.short) + '<em>›</em></button>';
+  const pill = '<button class="pill' + (infoOpen ? ' open' : '') + '" style="--c:var(--' + ({ green: 'green', orange: 'orange', red: 'red', blue: 'blue', gray: 'gray' }[s.color]) + ')" data-a="info" aria-expanded="' + infoOpen + '"><i></i><span>' + esc(s.short) + '</span><em>›</em></button>';
   const head = '<div class="pricehead"><div><div class="big">' + num(a.close) + (S.cache.currency ? '<small>' + esc(S.cache.currency) + '</small>' : '') + '</div>' +
     '<div class="chg ' + (chg >= 0 ? 'up' : 'down') + '">' + (chg >= 0 ? '▲ ' : '▼ ') + num(Math.abs(chg)) + ' % <span>zum Vortag</span></div></div>' + pill + '</div>';
   const panel = infoOpen ? '<div class="infopanel"><b>' + esc(s.title) + '</b><p>' + esc(s.text) + '</p>' + checkRows(a) +
