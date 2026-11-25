@@ -2,8 +2,8 @@ name: Kurse aktualisieren
 
 on:
   schedule:
-    # Mo-Fr fünfmal täglich (UTC). Hält die Abrufe unter dem Gratis-Limit von Alpha Vantage (2 Anfragen pro Lauf).
-    - cron: '5 7,10,13,16,19 * * 1-5'
+    # Mo-Fr alle 30 Minuten von 07:00 bis 18:30 UTC (Börsenzeit). Yahoo ist die Hauptquelle, Alpha Vantage greift nur als letzter Ausweg.
+    - cron: '7,37 7-18 * * 1-5'
   workflow_dispatch:
   push:
     paths:
