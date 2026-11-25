@@ -184,6 +184,7 @@ html{overscroll-behavior-y:contain}
 .pricehead .big{font-size:38px;font-weight:700;letter-spacing:.2px;line-height:1.1}
 .pricehead .big small{font-size:17px;font-weight:600;color:var(--label2);margin-left:6px}
 .pricehead .chg{font-size:15px;font-weight:600;margin-top:2px;white-space:nowrap}
+.pricehead .asof{font-size:12.5px;color:var(--label2);margin-top:1px;white-space:nowrap}
 .pricehead .chg.up{color:var(--green)}.pricehead .chg.down{color:var(--red)}.pricehead .chg span{color:var(--label2);font-weight:500}
 /* ---------- Meldung oben (Toast) ---------- */
 .toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 10px);transform:translate(-50%,-140%);z-index:20;width:max-content;max-width:calc(100vw - 32px);
@@ -201,7 +202,7 @@ html{overscroll-behavior-y:contain}
 <body>
 <div id="app"></div>
 <script>
-const APP_VERSION = '20261124131003';
+const APP_VERSION = '20261125213347';
 const KEY = 'astilla.v1', DAY = 86400000, FREE_LIMIT = 25, YAHOO_TTL = 15 * 60000;
 const pad = n => String(n).padStart(2, '0');
 const ds = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -751,7 +752,8 @@ function chartCard(a) {
   const s = status(a), pos = position();
   const pill = '<button class="pill' + (infoOpen ? ' open' : '') + '" style="--c:var(--' + ({ green: 'green', orange: 'orange', red: 'red', blue: 'blue', gray: 'gray' }[s.color]) + ')" data-a="info" aria-expanded="' + infoOpen + '"><i></i><span>' + esc(s.short) + '</span><em>›</em></button>';
   const head = '<div class="pricehead"><div><div class="big">' + num(a.close) + (S.cache.currency ? '<small>' + esc(S.cache.currency) + '</small>' : '') + '</div>' +
-    '<div class="chg ' + (chg >= 0 ? 'up' : 'down') + '">' + (chg >= 0 ? '▲ ' : '▼ ') + num(Math.abs(chg)) + ' % <span>zum Vortag</span></div></div>' + pill + '</div>';
+    '<div class="chg ' + (chg >= 0 ? 'up' : 'down') + '">' + (chg >= 0 ? '▲ ' : '▼ ') + num(Math.abs(chg)) + ' % <span>zum Vortag</span></div>' +
+    '<div class="asof">' + (D[L].d === ds(today()) ? 'Kurs von heute' : 'Schlusskurs vom ' + parseD(D[L].d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })) + '</div></div>' + pill + '</div>';
   const panel = infoOpen ? '<div class="infopanel"><b>' + esc(s.title) + '</b><p>' + esc(s.text) + '</p>' + checkRows(a) +
     '<div class="note">Alle drei Punkte müssen erfüllt sein, damit der Status auf „Kaufen“ springt.<br>' +
     '<span style="color:#ff9f0a">●</span> 20-Tage-Linie: Durchschnitt der letzten 20 Handelstage.<br>' +

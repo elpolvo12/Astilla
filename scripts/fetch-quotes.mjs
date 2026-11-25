@@ -89,8 +89,18 @@ async function fromAlpha(want) {
   };
   const daily = await get('TIME_SERIES_DAILY', '&outputsize=compact');
   await sleep(2000);
-  const weekly = await get('TIME_SERIES_WEEKLY');
-  return { name: want.symbol, currency: want.currency || '', liveTime: 0, daily, weekly };
+  const weekly = (await get('TIME_SERIES_WEEKLY')).slice(-110);
+  /* Zusätzlich der aktuelle Kurs (GLOBAL_QUOTE). Ob er für diese Börse mehr liefert als den Schlusskurs, zeigt das Protokoll. */
+  await sleep(2000);
+  let quote = null;
+  try {
+    const r = await fetch('https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=' + encodeURIComponent(sym) + '&apikey=' + encodeURIComponent(process.env.ALPHA_KEY));
+    const j = await r.json();
+    console.log('  GLOBAL_QUOTE roh: ' + clip(JSON.stringify(j)));
+    const g = j['Global Quote'];
+    if (g && g['05. price']) quote = { price: +g['05. price'], day: g['07. latest trading day'], prev: +g['08. previous close'], change: g['10. change percent'] };
+  } catch (e) { console.log('  GLOBAL_QUOTE fehlgeschlagen: ' + e.message); }
+  return { name: want.symbol, currency: want.currency || '', liveTime: 0, daily, weekly, quote };
 }
 
 /* ---------- Ablauf ---------- */
