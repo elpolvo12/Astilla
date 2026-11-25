@@ -88,19 +88,16 @@ async function fromAlpha(want) {
     catch (e) { if (!/spreading|per second/i.test(e.message)) throw e; await sleep(8000); return await alphaSeries(sym, fn, extra); }
   };
   const daily = await get('TIME_SERIES_DAILY', '&outputsize=compact');
-  await sleep(2000);
-  const weekly = (await get('TIME_SERIES_WEEKLY')).slice(-110);
-  /* Zusätzlich der aktuelle Kurs (GLOBAL_QUOTE). Ob er für diese Börse mehr liefert als den Schlusskurs, zeigt das Protokoll. */
-  await sleep(2000);
-  let quote = null;
-  try {
-    const r = await fetch('https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=' + encodeURIComponent(sym) + '&apikey=' + encodeURIComponent(process.env.ALPHA_KEY));
-    const j = await r.json();
-    console.log('  GLOBAL_QUOTE roh: ' + clip(JSON.stringify(j)));
-    const g = j['Global Quote'];
-    if (g && g['05. price']) quote = { price: +g['05. price'], day: g['07. latest trading day'], prev: +g['08. previous close'], change: g['10. change percent'] };
-  } catch (e) { console.log('  GLOBAL_QUOTE fehlgeschlagen: ' + e.message); }
-  return { name: want.symbol, currency: want.currency || '', liveTime: 0, daily, weekly, quote };
+  /* Wochenkurse nur neu holen, wenn es einen neuen Tageskurs gibt. Spart Anfragen. */
+  const old = out.symbols[want.symbol];
+  let weekly;
+  if (old && old.weekly && old.weekly.length > 31 && old.daily && old.daily.length && old.daily[old.daily.length - 1].d === daily[daily.length - 1].d) {
+    weekly = old.weekly;
+  } else {
+    await sleep(2000);
+    weekly = (await get('TIME_SERIES_WEEKLY')).slice(-110);
+  }
+  return { name: want.symbol, currency: want.currency || '', liveTime: 0, daily, weekly };
 }
 
 /* ---------- Ablauf ---------- */
@@ -109,8 +106,21 @@ let out = { updated: '', symbols: {} };
 try { out = JSON.parse(fs.readFileSync('quotes.json', 'utf8')); } catch (e) {}
 out.symbols = out.symbols || {};
 
+/* Alpha Vantage liefert nur Schlusskurse, und zwar mit einem Tag Verzug. Enthalten die Daten schon den letzten Handelstag,
+   gibt es bis zum nächsten Tag nichts Neues. Dann keine Anfrage und keine Änderung, damit Limit und Commit-Liste geschont werden. */
+const prevBusinessDay = () => {
+  const x = new Date(); x.setUTCHours(12, 0, 0, 0); x.setUTCDate(x.getUTCDate() - 1);
+  while (x.getUTCDay() === 0 || x.getUTCDay() === 6) x.setUTCDate(x.getUTCDate() - 1);
+  return x.toISOString().slice(0, 10);
+};
+const isCurrent = d => d && d.source === 'Alpha Vantage' && d.daily && d.daily.length >= 50 && d.daily[d.daily.length - 1].d >= prevBusinessDay();
+if (process.env.FORCE !== '1' && cfg.length && cfg.every(item => isCurrent(out.symbols[(typeof item === 'string' ? { symbol: item } : item).symbol]))) {
+  console.log('Daten sind aktuell (letzter Handelstag ' + prevBusinessDay() + '). Keine Anfrage, keine Änderung.');
+  process.exit(0);
+}
+
 const SOURCES = [['Yahoo', fromYahoo], ['Stooq', fromStooq], ['Alpha Vantage', fromAlpha]];
-let ok = 0;
+let ok = 0, changed = false;
 for (const item of cfg) {
   const want = typeof item === 'string' ? { symbol: item } : item;
   let data = null;
@@ -123,11 +133,18 @@ for (const item of cfg) {
       break;
     } catch (e) { console.log(want.symbol + ': ' + name + ' fehlgeschlagen: ' + e.message); }
   }
-  if (data) { out.symbols[want.symbol] = data; ok++; }
+  if (data) {
+    const prev = out.symbols[want.symbol];
+    const last = a => a && a.daily && a.daily.length ? a.daily[a.daily.length - 1] : null;
+    const same = prev && prev.source === data.source && last(prev) && last(prev).d === last(data).d && last(prev).c === last(data).c;
+    if (!same) { out.symbols[want.symbol] = data; changed = true; }
+    ok++;
+  }
 }
 if (!ok) {
   console.log('::warning::Keine Quelle lieferte Kurse. quotes.json bleibt unverändert.');
   process.exit(0);
 }
+if (!changed) { console.log('Keine neuen Kurse. quotes.json bleibt unverändert.'); process.exit(0); }
 out.updated = new Date().toISOString();
 fs.writeFileSync('quotes.json', JSON.stringify(out));
